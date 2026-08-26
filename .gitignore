@@ -1,0 +1,16 @@
+# Entornos virtuales
+*venv*/
+.venv/
+
+# Datos generados/procesados (regenerables desde Cargar_datos.ipynb)
+data/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Python
+__pycache__/
+*.pyc
+
+# Variables de entorno
+.env
