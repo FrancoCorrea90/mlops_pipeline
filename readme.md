@@ -1,25 +1,24 @@
-# mlops_pipeline
+# MLOps Pipeline
 
-Proyecto integrador — Módulo 5 (Henry). Pipeline de datos y modelado para predecir el pago a tiempo de créditos otorgados por una empresa financiera, a partir de datos históricos de crédito.
+Proyecto integrador desarrollado en el marco del **Módulo 5 - Producción ML / MLOps**.
 
-## Estructura
+El objetivo es construir un flujo de Machine Learning reproducible y versionado, desde la comprensión y preparación de los datos hasta el entrenamiento, evaluación y futura puesta en producción de un modelo.
 
-```
-mlops_pipeline/
-├── Base_de_datos.xlsx        # Fuente de datos original (histórico de créditos)
-├── requirements.txt          # Dependencias del entorno virtual
-└── src/
-    ├── config.json            # Configuración del proyecto (nombre del entorno virtual)
-    ├── Cargar_datos.ipynb      # Carga y validación inicial de Base_de_datos.xlsx
-    └── comprension_eda.ipynb   # Análisis exploratorio de datos (EDA)
-```
+## Objetivo
 
-## Cómo ejecutar
+Desarrollar un pipeline que permita:
 
-1. Crear y activar un entorno virtual con las dependencias de `requirements.txt`, y registrarlo como kernel de Jupyter.
-2. Abrir `src/Cargar_datos.ipynb` y ejecutar todas las celdas para validar la carga de `Base_de_datos.xlsx`.
-3. Abrir `src/comprension_eda.ipynb` y ejecutar todas las celdas para el análisis exploratorio (nulos, outliers, distribuciones, correlaciones y relación con la variable objetivo `Pago_atiempo`).
+- analizar y preparar los datos;
+- realizar feature engineering;
+- entrenar y comparar modelos;
+- seleccionar un modelo candidato;
+- aplicar buenas prácticas de versionado, modularidad y reproducibilidad.
 
-## Estado
+## Problema
 
-Avance 1: carga de datos y análisis exploratorio. Próximos pasos: limpieza de datos y desarrollo del modelo predictivo.
+El proyecto utiliza un dataset de créditos y comportamiento financiero de clientes.
+
+La variable objetivo es:
+
+```text
+Pago_atiempo
