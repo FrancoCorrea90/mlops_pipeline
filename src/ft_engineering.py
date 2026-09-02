@@ -345,8 +345,7 @@ if __name__ == "__main__":
     # 5. Crear preprocesador
     preprocessor = build_preprocessor()
 
-    # IMPORTANTE:
-    # Se ajusta solamente con TRAIN para evitar data leakage.
+    # Se ajusta solamente con TRAIN para evitar data leakage
     X_train_processed = preprocessor.fit_transform(X_train)
 
     # TEST solamente se transforma
@@ -362,5 +361,28 @@ if __name__ == "__main__":
         "Shape test transformado:",
         X_test_processed.shape
     )
+
+    # 6. Validación final
+    print("\n===== VALIDACIÓN FINAL =====")
+
+    print(
+        "Nulos en train procesado:",
+        pd.DataFrame(X_train_processed).isnull().sum().sum()
+    )
+
+    print(
+        "Nulos en test procesado:",
+        pd.DataFrame(X_test_processed).isnull().sum().sum()
+    )
+
+    feature_names = preprocessor.get_feature_names_out()
+
+    print("\nCantidad de features finales:")
+    print(len(feature_names))
+
+    print("\nFeatures generadas:")
+
+    for feature in feature_names:
+        print(feature)
 
     print("\nFeature engineering ejecutado correctamente.")
