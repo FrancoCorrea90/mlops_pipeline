@@ -32,6 +32,7 @@ TEST_SIZE = 0.20
 # se excluyen del modelo principal por no poder garantizar que
 # estén disponibles al momento de otorgar el crédito.
 POTENTIAL_LEAKAGE_FEATURES = [
+    "puntaje",
     "saldo_mora",
     "saldo_total",
     "saldo_principal",
@@ -50,7 +51,6 @@ NUMERIC_FEATURES = [
     "salario_cliente",
     "total_otros_prestamos",
     "cuota_pactada",
-    "puntaje",
     "puntaje_datacredito",
     "cant_creditosvigentes",
     "huella_consulta",
