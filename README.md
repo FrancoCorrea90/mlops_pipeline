@@ -642,11 +642,11 @@ El repositorio utiliza diferentes ramas para separar desarrollo, integración y 
 
 feature/\*
 
-&#x20;   ↓
+;   ↓
 
 developer
 
-&#x20;   ↓
+;   ↓
 
 main
 
@@ -836,39 +836,39 @@ http://localhost:8501
 
 Datos
 
-&#x20; ↓
+ ↓
 
 EDA
 
-&#x20; ↓
+ ↓
 
 Feature Engineering
 
-&#x20; ↓
+ ↓
 
 Entrenamiento
 
-&#x20; ↓
+ ↓
 
 Evaluación
 
-&#x20; ↓
+ ↓
 
 Selección del modelo
 
-&#x20; ↓
+ ↓
 
 Persistencia
 
-&#x20; ↓
+ ↓
 
 Monitoreo de Data Drift
 
-&#x20; ↓
+ ↓
 
 Aplicación Streamlit
 
-&#x20; ↓
+ ↓
 
 Próximas etapas de producción
 
