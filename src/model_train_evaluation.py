@@ -1,3 +1,4 @@
+import joblib
 import pandas as pd
 import matplotlib.pyplot as plt
 
@@ -21,6 +22,7 @@ from sklearn.metrics import (
 from xgboost import XGBClassifier
 
 from ft_engineering import (
+    BASE_DIR,
     load_data,
     clean_data,
     split_features_target,
@@ -356,6 +358,22 @@ if __name__ == "__main__":
         f"{best_model_name} "
         f"(F1-Score clase 0 = {best_f1_score:.4f})"
     )
+
+    # --------------------------------------------------
+    # 8. Persistencia del mejor modelo
+    # --------------------------------------------------
+
+    best_model = trained_models[best_model_name]
+
+    model_path = BASE_DIR / "best_model.joblib"
+
+    joblib.dump(
+        best_model,
+        model_path,
+    )
+
+    print("\nModelo guardado en:")
+    print(model_path)
 
     # XGBoost es seleccionado como modelo candidato al presentar
     # el mejor F1-Score sobre la clase minoritaria.

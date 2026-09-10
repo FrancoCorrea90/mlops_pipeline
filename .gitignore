@@ -17,3 +17,5 @@ __pycache__/
 
 # Editor
 .vscode/
+best_model.joblib
+best_model.joblib
