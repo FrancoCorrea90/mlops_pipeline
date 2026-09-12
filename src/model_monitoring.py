@@ -33,6 +33,15 @@ EPSILON = 1e-6
 PSI_WARNING = 0.10
 PSI_CRITICAL = 0.25
 
+KS_WARNING = 0.15
+KS_CRITICAL = 0.25
+
+JS_WARNING = 0.15
+JS_CRITICAL = 0.30
+
+CHI2_P_THRESHOLD = 0.05
+KS_P_THRESHOLD = 0.05
+
 MONITORING_FREQUENCY = "Mensual"
 MIN_TEMPORAL_SAMPLES = 50
 
@@ -40,6 +49,20 @@ TEMPORAL_FEATURES = [
     "anio_prestamo",
     "mes_prestamo",
 ]
+
+STATUS_ORDER = {
+    "Estable": 0,
+    "Vigilancia": 1,
+    "Drift": 2,
+    "Sin datos": -1,
+}
+
+STATUS_ICON = {
+    "Estable": "🟢",
+    "Vigilancia": "🟡",
+    "Drift": "🔴",
+    "Sin datos": "⚪",
+}
 
 
 # ============================================================
@@ -58,7 +81,7 @@ def _reference_bins(
 ) -> np.ndarray:
     """
     Construye intervalos a partir de cuantiles de la población
-    histórica. Los mismos intervalos se reutilizan sobre la actual.
+    histórica y reutiliza esos intervalos en la población actual.
     """
     reference = pd.to_numeric(
         reference,
@@ -78,7 +101,6 @@ def _reference_bins(
 
     if len(edges) < 2:
         value = float(reference.iloc[0])
-
         return np.array(
             [-np.inf, value, np.inf]
         )
@@ -87,6 +109,17 @@ def _reference_bins(
     edges[-1] = np.inf
 
     return edges
+
+
+def format_number(
+    value,
+    decimals: int = 4,
+) -> str:
+    """Formatea métricas sin fallar ante NaN."""
+    if pd.isna(value):
+        return "N/D"
+
+    return f"{value:.{decimals}f}"
 
 
 # ============================================================
@@ -254,9 +287,7 @@ def jensen_shannon_numeric(
         ** 2
     )
 
-    return float(
-        js_divergence
-    )
+    return float(js_divergence)
 
 
 def jensen_shannon_categorical(
@@ -318,61 +349,218 @@ def jensen_shannon_categorical(
         ** 2
     )
 
-    return float(
-        js_divergence
+    return float(js_divergence)
+
+
+# ============================================================
+# CLASIFICACIÓN COMBINADA
+# ============================================================
+
+def classify_numeric_drift(
+    psi: float,
+    ks_statistic: float,
+    ks_pvalue: float,
+    js: float,
+) -> tuple[str, list[str]]:
+    """
+    Combina PSI, KS y Jensen-Shannon.
+
+    Drift:
+        alguna métrica de magnitud supera umbral crítico.
+
+    Vigilancia:
+        señal intermedia o evidencia estadística significativa.
+
+    Estable:
+        no se detectan señales relevantes.
+    """
+    if all(
+        pd.isna(value)
+        for value in [
+            psi,
+            ks_statistic,
+            js,
+        ]
+    ):
+        return "Sin datos", []
+
+    critical_signals = []
+    warning_signals = []
+
+    if pd.notna(psi):
+        if psi >= PSI_CRITICAL:
+            critical_signals.append(
+                f"PSI={psi:.3f} ≥ {PSI_CRITICAL}"
+            )
+        elif psi >= PSI_WARNING:
+            warning_signals.append(
+                f"PSI={psi:.3f} ≥ {PSI_WARNING}"
+            )
+
+    if pd.notna(ks_statistic):
+        if ks_statistic >= KS_CRITICAL:
+            critical_signals.append(
+                f"KS={ks_statistic:.3f} ≥ {KS_CRITICAL}"
+            )
+        elif ks_statistic >= KS_WARNING:
+            warning_signals.append(
+                f"KS={ks_statistic:.3f} ≥ {KS_WARNING}"
+            )
+
+    if pd.notna(js):
+        if js >= JS_CRITICAL:
+            critical_signals.append(
+                f"JS={js:.3f} ≥ {JS_CRITICAL}"
+            )
+        elif js >= JS_WARNING:
+            warning_signals.append(
+                f"JS={js:.3f} ≥ {JS_WARNING}"
+            )
+
+    # Un p-value significativo de KS por sí solo genera vigilancia.
+    if (
+        pd.notna(ks_pvalue)
+        and ks_pvalue < KS_P_THRESHOLD
+        and not critical_signals
+    ):
+        warning_signals.append(
+            f"KS p={ks_pvalue:.3f} < {KS_P_THRESHOLD}"
+        )
+
+    if critical_signals:
+        return (
+            "Drift",
+            critical_signals
+            + warning_signals,
+        )
+
+    if warning_signals:
+        return (
+            "Vigilancia",
+            warning_signals,
+        )
+
+    return "Estable", []
+
+
+def classify_categorical_drift(
+    psi: float,
+    chi2_pvalue: float,
+    js: float,
+) -> tuple[str, list[str]]:
+    """
+    Combina PSI, Chi-cuadrado y Jensen-Shannon.
+
+    Chi² p < 0.05 por sí solo genera vigilancia.
+    Si además existe una señal de magnitud, refuerza el drift.
+    """
+    if all(
+        pd.isna(value)
+        for value in [
+            psi,
+            chi2_pvalue,
+            js,
+        ]
+    ):
+        return "Sin datos", []
+
+    critical_signals = []
+    warning_signals = []
+
+    if pd.notna(psi):
+        if psi >= PSI_CRITICAL:
+            critical_signals.append(
+                f"PSI={psi:.3f} ≥ {PSI_CRITICAL}"
+            )
+        elif psi >= PSI_WARNING:
+            warning_signals.append(
+                f"PSI={psi:.3f} ≥ {PSI_WARNING}"
+            )
+
+    if pd.notna(js):
+        if js >= JS_CRITICAL:
+            critical_signals.append(
+                f"JS={js:.3f} ≥ {JS_CRITICAL}"
+            )
+        elif js >= JS_WARNING:
+            warning_signals.append(
+                f"JS={js:.3f} ≥ {JS_WARNING}"
+            )
+
+    chi2_significant = (
+        pd.notna(chi2_pvalue)
+        and chi2_pvalue
+        < CHI2_P_THRESHOLD
     )
 
+    if chi2_significant:
+        if (
+            critical_signals
+            or (
+                pd.notna(psi)
+                and psi >= PSI_WARNING
+            )
+            or (
+                pd.notna(js)
+                and js >= JS_WARNING
+            )
+        ):
+            critical_signals.append(
+                f"Chi² p={chi2_pvalue:.3f} < {CHI2_P_THRESHOLD}"
+            )
 
-# ============================================================
-# CLASIFICACIÓN Y RECOMENDACIONES
-# ============================================================
+        else:
+            warning_signals.append(
+                f"Chi² p={chi2_pvalue:.3f} < {CHI2_P_THRESHOLD}"
+            )
 
-def classify_drift(
-    psi: float,
-) -> str:
-    """
-    Semáforo operativo basado en PSI.
+    if critical_signals:
+        return (
+            "Drift",
+            critical_signals
+            + warning_signals,
+        )
 
-    PSI < 0.10:
-        Estable.
+    if warning_signals:
+        return (
+            "Vigilancia",
+            warning_signals,
+        )
 
-    0.10 <= PSI < 0.25:
-        Advertencia.
-
-    PSI >= 0.25:
-        Crítico.
-    """
-    if pd.isna(psi):
-        return "Sin datos"
-
-    if psi >= PSI_CRITICAL:
-        return "Crítico"
-
-    if psi >= PSI_WARNING:
-        return "Advertencia"
-
-    return "Estable"
+    return "Estable", []
 
 
 def drift_recommendation(
     status: str,
+    feature_type: str,
 ) -> str:
-    """Devuelve una recomendación operativa según el nivel de drift."""
-    if status == "Crítico":
+    """Genera recomendaciones operativas según el estado."""
+    if status == "Drift":
+        if feature_type == "Numérica":
+            return (
+                "Revisar la distribución y calidad de la variable, "
+                "comparar con períodos anteriores y validar cambios "
+                "en la fuente. Evaluar el impacto sobre el desempeño "
+                "del modelo y considerar reentrenamiento si persiste."
+            )
+
         return (
-            "Revisar la variable, validar calidad/origen del dato "
-            "y evaluar reentrenamiento si el cambio persiste."
+            "Revisar cambios en categorías, frecuencias y calidad "
+            "de origen. Validar categorías nuevas o faltantes y "
+            "evaluar impacto sobre el modelo. Considerar "
+            "reentrenamiento si el cambio persiste."
         )
 
-    if status == "Advertencia":
+    if status == "Vigilancia":
         return (
-            "Mantener seguimiento en los próximos períodos "
-            "y revisar la tendencia de la variable."
+            "Mantener la variable bajo seguimiento. Revisar su "
+            "evolución en los próximos períodos y confirmar si "
+            "la señal se sostiene antes de tomar acciones."
         )
 
     if status == "Estable":
         return (
-            "Sin acción inmediata; continuar monitoreo periódico."
+            "Sin acción inmediata. Continuar con el monitoreo periódico."
         )
 
     return (
@@ -409,6 +597,7 @@ def monitor_numeric_feature(
             "PSI": np.nan,
             "Jensen-Shannon": np.nan,
             "Estado": "Sin datos",
+            "Señales": "",
             "Recomendación": (
                 "No hay información suficiente para evaluar la variable."
             ),
@@ -429,8 +618,15 @@ def monitor_numeric_feature(
         cur,
     )
 
-    status = classify_drift(
-        psi
+    status, signals = classify_numeric_drift(
+        psi=psi,
+        ks_statistic=float(
+            ks_result.statistic
+        ),
+        ks_pvalue=float(
+            ks_result.pvalue
+        ),
+        js=js,
     )
 
     return {
@@ -445,8 +641,12 @@ def monitor_numeric_feature(
         "PSI": psi,
         "Jensen-Shannon": js,
         "Estado": status,
+        "Señales": " | ".join(
+            signals
+        ),
         "Recomendación": drift_recommendation(
-            status
+            status=status,
+            feature_type="Numérica",
         ),
     }
 
@@ -523,8 +723,16 @@ def monitor_categorical_feature(
         cur,
     )
 
-    status = classify_drift(
-        psi
+    status, signals = classify_categorical_drift(
+        psi=psi,
+        chi2_pvalue=(
+            float(chi2_pvalue)
+            if pd.notna(
+                chi2_pvalue
+            )
+            else np.nan
+        ),
+        js=js,
     )
 
     return {
@@ -547,8 +755,12 @@ def monitor_categorical_feature(
         "PSI": psi,
         "Jensen-Shannon": js,
         "Estado": status,
+        "Señales": " | ".join(
+            signals
+        ),
         "Recomendación": drift_recommendation(
-            status
+            status=status,
+            feature_type="Categórica",
         ),
     }
 
@@ -557,7 +769,7 @@ def calculate_drift_table(
     reference_df: pd.DataFrame,
     current_df: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Genera una tabla consolidada de métricas de data drift."""
+    """Genera la tabla consolidada de métricas de Data Drift."""
     rows = []
 
     for feature in NUMERIC_FEATURES:
@@ -596,12 +808,30 @@ def calculate_drift_table(
     )
 
     if not drift_df.empty:
-        drift_df["Alerta"] = (
+        drift_df[
+            "Semáforo"
+        ] = (
+            drift_df["Estado"]
+            .map(STATUS_ICON)
+            .fillna("⚪")
+        )
+
+        drift_df[
+            "Nivel"
+        ] = (
+            drift_df["Estado"]
+            .map(STATUS_ORDER)
+            .fillna(-1)
+        )
+
+        drift_df[
+            "Alerta"
+        ] = (
             drift_df["Estado"]
             .isin(
                 [
-                    "Advertencia",
-                    "Crítico",
+                    "Vigilancia",
+                    "Drift",
                 ]
             )
         )
@@ -609,8 +839,14 @@ def calculate_drift_table(
         drift_df = (
             drift_df
             .sort_values(
-                by="PSI",
-                ascending=False,
+                by=[
+                    "Nivel",
+                    "PSI",
+                ],
+                ascending=[
+                    False,
+                    False,
+                ],
                 na_position="last",
             )
             .reset_index(
@@ -619,6 +855,32 @@ def calculate_drift_table(
         )
 
     return drift_df
+
+
+def get_overall_status(
+    drift_table: pd.DataFrame,
+) -> str:
+    """Devuelve el peor estado global observado."""
+    if drift_table.empty:
+        return "Sin datos"
+
+    if (
+        drift_table[
+            "Estado"
+        ]
+        == "Drift"
+    ).any():
+        return "Drift"
+
+    if (
+        drift_table[
+            "Estado"
+        ]
+        == "Vigilancia"
+    ).any():
+        return "Vigilancia"
+
+    return "Estable"
 
 
 # ============================================================
@@ -630,11 +892,7 @@ def build_prediction_table(
     X_current: pd.DataFrame,
     y_current: pd.Series | None = None,
 ) -> pd.DataFrame:
-    """
-    Devuelve los datos actuales junto con el pronóstico del modelo,
-    la probabilidad de no pagar a tiempo y, si está disponible,
-    el valor real.
-    """
+    """Devuelve datos actuales junto con pronósticos del modelo."""
     output = X_current.copy()
 
     predictions = model.predict(
@@ -689,13 +947,8 @@ def calculate_temporal_drift(
     current_df: pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    Calcula la evolución mensual del drift usando una referencia fija.
-
-    anio_prestamo y mes_prestamo se utilizan para construir el período,
-    pero se excluyen del cálculo mensual para evitar drift artificial.
-
-    Los períodos con menos de MIN_TEMPORAL_SAMPLES observaciones
-    no se informan.
+    Calcula evolución mensual del drift usando una referencia fija.
+    anio_prestamo y mes_prestamo se usan solo para construir período.
     """
     required = {
         "anio_prestamo",
@@ -709,7 +962,9 @@ def calculate_temporal_drift(
 
     temp = current_df.copy()
 
-    temp["periodo"] = pd.to_datetime(
+    temp[
+        "periodo"
+    ] = pd.to_datetime(
         dict(
             year=temp[
                 "anio_prestamo"
@@ -735,9 +990,13 @@ def calculate_temporal_drift(
     grouped = (
         temp
         .dropna(
-            subset=["periodo"]
+            subset=[
+                "periodo"
+            ]
         )
-        .groupby("periodo")
+        .groupby(
+            "periodo"
+        )
     )
 
     for period, period_df in grouped:
@@ -756,7 +1015,9 @@ def calculate_temporal_drift(
             .drop(
                 columns=(
                     TEMPORAL_FEATURES
-                    + ["periodo"]
+                    + [
+                        "periodo"
+                    ]
                 ),
                 errors="ignore",
             )
@@ -771,58 +1032,86 @@ def calculate_temporal_drift(
             continue
 
         valid_psi = drift.dropna(
-            subset=["PSI"]
-        )
-
-        if valid_psi.empty:
-            continue
-
-        max_index = (
-            valid_psi["PSI"]
-            .idxmax()
-        )
-
-        most_affected = (
-            valid_psi
-            .loc[max_index]
-        )
-
-        max_psi = float(
-            most_affected[
+            subset=[
                 "PSI"
             ]
         )
 
-        period_status = classify_drift(
-            max_psi
+        psi_average = (
+            float(
+                valid_psi[
+                    "PSI"
+                ].mean()
+            )
+            if not valid_psi.empty
+            else np.nan
         )
+
+        psi_max = (
+            float(
+                valid_psi[
+                    "PSI"
+                ].max()
+            )
+            if not valid_psi.empty
+            else np.nan
+        )
+
+        period_status = get_overall_status(
+            drift
+        )
+
+        ranked = (
+            drift
+            .sort_values(
+                by=[
+                    "Nivel",
+                    "PSI",
+                    "Jensen-Shannon",
+                ],
+                ascending=[
+                    False,
+                    False,
+                    False,
+                ],
+                na_position="last",
+            )
+        )
+
+        most_affected = ranked.iloc[
+            0
+        ]
 
         rows.append(
             {
                 "Periodo": period,
                 "Muestras actuales": sample_size,
-                "PSI promedio": float(
-                    valid_psi[
-                        "PSI"
-                    ].mean()
-                ),
-                "PSI máximo": max_psi,
+                "PSI promedio": psi_average,
+                "PSI máximo": psi_max,
                 "Variable más afectada": (
                     most_affected[
                         "Variable"
                     ]
                 ),
                 "Estado período": period_status,
-                "Variables en advertencia": int(
+                "Semáforo": STATUS_ICON.get(
+                    period_status,
+                    "⚪",
+                ),
+                "Variables en vigilancia": int(
                     (
-                        drift["Estado"]
-                        == "Advertencia"
+                        drift[
+                            "Estado"
+                        ]
+                        == "Vigilancia"
                     ).sum()
                 ),
-                "Variables críticas": int(
+                "Variables con drift": int(
                     (
-                        drift["Estado"]
-                        == "Crítico"
+                        drift[
+                            "Estado"
+                        ]
+                        == "Drift"
                     ).sum()
                 ),
                 "Variables con alerta": int(
@@ -835,8 +1124,15 @@ def calculate_temporal_drift(
                         drift
                     )
                 ),
-                "Recomendación": drift_recommendation(
-                    period_status
+                "Señal principal": (
+                    most_affected[
+                        "Señales"
+                    ]
+                ),
+                "Recomendación": (
+                    most_affected[
+                        "Recomendación"
+                    ]
                 ),
             }
         )
@@ -857,8 +1153,72 @@ def calculate_temporal_drift(
     )
 
 
+def get_period_drift_detail(
+    reference_df: pd.DataFrame,
+    current_df: pd.DataFrame,
+    selected_period,
+) -> pd.DataFrame:
+    """Devuelve detalle por variable para un período."""
+    temp = current_df.copy()
+
+    temp[
+        "periodo"
+    ] = pd.to_datetime(
+        dict(
+            year=temp[
+                "anio_prestamo"
+            ],
+            month=temp[
+                "mes_prestamo"
+            ],
+            day=1,
+        ),
+        errors="coerce",
+    )
+
+    selected_period = pd.Timestamp(
+        selected_period
+    )
+
+    period_df = temp.loc[
+        temp[
+            "periodo"
+        ]
+        == selected_period
+    ]
+
+    if period_df.empty:
+        return pd.DataFrame()
+
+    reference_features = (
+        reference_df
+        .drop(
+            columns=TEMPORAL_FEATURES,
+            errors="ignore",
+        )
+    )
+
+    period_features = (
+        period_df
+        .drop(
+            columns=(
+                TEMPORAL_FEATURES
+                + [
+                    "periodo"
+                ]
+            ),
+            errors="ignore",
+        )
+    )
+
+    return calculate_drift_table(
+        reference_df=reference_features,
+        current_df=period_features,
+    )
+
+
 # ============================================================
-# CARGA DEL MODELO
+# CARGA DE MODELO Y DATOS
 # ============================================================
 
 def load_model(
@@ -875,22 +1235,13 @@ def load_model(
     )
 
 
-# ============================================================
-# PREPARACIÓN DE DATOS DE MONITOREO
-# ============================================================
-
 def _prepare_external_current_data(
     raw_current: pd.DataFrame,
 ) -> tuple[
     pd.DataFrame,
     pd.Series | None,
 ]:
-    """
-    Prepara un lote externo con el mismo esquema del dataset original.
-
-    La variable objetivo puede estar presente o no. Si no existe,
-    se agrega temporalmente para reutilizar clean_data().
-    """
+    """Prepara un lote externo con el mismo esquema esperado."""
     raw_current = raw_current.copy()
 
     target_available = (
@@ -938,15 +1289,13 @@ def prepare_monitoring_data(
     raw_current: pd.DataFrame | None = None,
 ):
     """
-    Prepara la población de referencia y la población actual.
-
-    Modo por defecto:
+    Por defecto:
         TRAIN = referencia histórica.
-        TEST = muestra actual simulada.
+        TEST = población actual simulada.
 
-    Si se proporciona raw_current:
-        TRAIN continúa como referencia histórica.
-        raw_current actúa como nuevo lote de producción.
+    Con raw_current:
+        TRAIN = referencia.
+        raw_current = población actual externa.
     """
     df = clean_data(
         load_data()
@@ -989,14 +1338,10 @@ def prepare_monitoring_data(
     )
 
 
-# ============================================================
-# LECTURA DE ARCHIVO EXTERNO
-# ============================================================
-
 def read_uploaded_data(
     uploaded_file,
 ) -> pd.DataFrame:
-    """Lee un archivo CSV o Excel cargado desde Streamlit."""
+    """Lee CSV o Excel cargado desde Streamlit."""
     file_name = (
         uploaded_file.name
         .lower()
@@ -1010,7 +1355,10 @@ def read_uploaded_data(
         )
 
     if file_name.endswith(
-        (".xlsx", ".xls")
+        (
+            ".xlsx",
+            ".xls",
+        )
     ):
         return pd.read_excel(
             uploaded_file
@@ -1022,7 +1370,7 @@ def read_uploaded_data(
 
 
 # ============================================================
-# VISUALIZACIÓN
+# VISUALIZACIONES
 # ============================================================
 
 def plot_distribution_comparison(
@@ -1030,24 +1378,27 @@ def plot_distribution_comparison(
     current_df: pd.DataFrame,
     feature: str,
 ):
-    """
-    Construye un gráfico de comparación entre
-    distribución histórica y actual.
-    """
+    """Compara distribución histórica vs actual."""
     if feature in NUMERIC_FEATURES:
-
         ref = pd.to_numeric(
-            reference_df[feature],
+            reference_df[
+                feature
+            ],
             errors="coerce",
         ).dropna()
 
         cur = pd.to_numeric(
-            current_df[feature],
+            current_df[
+                feature
+            ],
             errors="coerce",
         ).dropna()
 
         fig, ax = plt.subplots(
-            figsize=(9, 4.5)
+            figsize=(
+                9,
+                4.5,
+            )
         )
 
         ax.hist(
@@ -1085,26 +1436,42 @@ def plot_distribution_comparison(
         return fig
 
     ref_dist = (
-        reference_df[feature]
-        .fillna("MISSING")
-        .astype(str)
+        reference_df[
+            feature
+        ]
+        .fillna(
+            "MISSING"
+        )
+        .astype(
+            str
+        )
         .value_counts(
             normalize=True
         )
     )
 
     cur_dist = (
-        current_df[feature]
-        .fillna("MISSING")
-        .astype(str)
+        current_df[
+            feature
+        ]
+        .fillna(
+            "MISSING"
+        )
+        .astype(
+            str
+        )
         .value_counts(
             normalize=True
         )
     )
 
     categories = sorted(
-        set(ref_dist.index)
-        | set(cur_dist.index)
+        set(
+            ref_dist.index
+        )
+        | set(
+            cur_dist.index
+        )
     )
 
     comparison = pd.DataFrame(
@@ -1127,7 +1494,10 @@ def plot_distribution_comparison(
     )
 
     fig, ax = plt.subplots(
-        figsize=(9, 4.5)
+        figsize=(
+            9,
+            4.5,
+        )
     )
 
     comparison.plot(
@@ -1157,25 +1527,319 @@ def plot_distribution_comparison(
     return fig
 
 
+def plot_temporal_evolution(
+    temporal_drift: pd.DataFrame,
+):
+    """Grafica PSI promedio y máximo a lo largo del tiempo."""
+    chart = (
+        temporal_drift[
+            [
+                "Periodo",
+                "PSI promedio",
+                "PSI máximo",
+            ]
+        ]
+        .set_index(
+            "Periodo"
+        )
+    )
+
+    fig, ax = plt.subplots(
+        figsize=(
+            10,
+            4.5,
+        )
+    )
+
+    chart.plot(
+        ax=ax,
+        marker="o",
+    )
+
+    ax.axhline(
+        PSI_WARNING,
+        linestyle="--",
+        linewidth=1,
+        label="Umbral PSI vigilancia",
+    )
+
+    ax.axhline(
+        PSI_CRITICAL,
+        linestyle="--",
+        linewidth=1,
+        label="Umbral PSI crítico",
+    )
+
+    ax.set_title(
+        "Evolución temporal del Data Drift"
+    )
+
+    ax.set_xlabel(
+        "Período"
+    )
+
+    ax.set_ylabel(
+        "PSI"
+    )
+
+    ax.legend()
+
+    fig.tight_layout()
+
+    return fig
+
+
+def plot_temporal_alert_counts(
+    temporal_drift: pd.DataFrame,
+):
+    """Grafica variables en vigilancia y drift por período."""
+    chart = (
+        temporal_drift[
+            [
+                "Periodo",
+                "Variables en vigilancia",
+                "Variables con drift",
+            ]
+        ]
+        .set_index(
+            "Periodo"
+        )
+    )
+
+    fig, ax = plt.subplots(
+        figsize=(
+            10,
+            4.5,
+        )
+    )
+
+    chart.plot(
+        kind="bar",
+        ax=ax,
+    )
+
+    ax.set_title(
+        "Variables con alerta por período"
+    )
+
+    ax.set_xlabel(
+        "Período"
+    )
+
+    ax.set_ylabel(
+        "Cantidad de variables"
+    )
+
+    ax.tick_params(
+        axis="x",
+        rotation=45,
+    )
+
+    fig.tight_layout()
+
+    return fig
+
+
 def render_status_message(
     status: str,
     text: str,
 ):
-    """Renderiza un mensaje visual según el nivel de drift."""
-    if status == "Crítico":
+    """Muestra mensajes visuales según estado."""
+    if status == "Drift":
         st.error(
             f"🔴 {text}"
         )
 
-    elif status == "Advertencia":
+    elif status == "Vigilancia":
         st.warning(
             f"🟡 {text}"
         )
 
-    else:
+    elif status == "Estable":
         st.success(
             f"🟢 {text}"
         )
+
+    else:
+        st.info(
+            f"⚪ {text}"
+        )
+
+
+def build_display_table(
+    drift_table: pd.DataFrame,
+) -> pd.DataFrame:
+    """Selecciona columnas para la tabla principal."""
+    columns = [
+        "Semáforo",
+        "Variable",
+        "Tipo",
+        "PSI",
+        "KS statistic",
+        "KS p-value",
+        "Jensen-Shannon",
+        "Chi2 statistic",
+        "Chi2 p-value",
+        "Estado",
+        "Señales",
+    ]
+
+    existing = [
+        column
+        for column in columns
+        if column
+        in drift_table.columns
+    ]
+
+    return (
+        drift_table[
+            existing
+        ]
+        .copy()
+        .round(4)
+    )
+
+
+def build_alert_table(
+    drift_table: pd.DataFrame,
+) -> pd.DataFrame:
+    """Genera tabla de alertas y recomendaciones."""
+    alerts = drift_table.loc[
+        drift_table[
+            "Estado"
+        ].isin(
+            [
+                "Vigilancia",
+                "Drift",
+            ]
+        )
+    ].copy()
+
+    columns = [
+        "Semáforo",
+        "Variable",
+        "Tipo",
+        "Estado",
+        "Señales",
+        "Recomendación",
+    ]
+
+    if alerts.empty:
+        return pd.DataFrame(
+            columns=columns
+        )
+
+    return alerts[
+        columns
+    ]
+
+
+def register_internal_notification(
+    overall_status: str,
+    drift_table: pd.DataFrame,
+):
+    """Registra una notificación interna si cambian las alertas."""
+    alerts = drift_table.loc[
+        drift_table[
+            "Estado"
+        ].isin(
+            [
+                "Vigilancia",
+                "Drift",
+            ]
+        ),
+        [
+            "Variable",
+            "Estado",
+        ],
+    ]
+
+    fingerprint = tuple(
+        sorted(
+            (
+                row[
+                    "Variable"
+                ],
+                row[
+                    "Estado"
+                ],
+            )
+            for _,
+            row
+            in alerts.iterrows()
+        )
+    )
+
+    previous = st.session_state.get(
+        "alert_fingerprint"
+    )
+
+    if (
+        fingerprint
+        and fingerprint
+        != previous
+    ):
+        drift_count = int(
+            (
+                drift_table[
+                    "Estado"
+                ]
+                == "Drift"
+            ).sum()
+        )
+
+        watch_count = int(
+            (
+                drift_table[
+                    "Estado"
+                ]
+                == "Vigilancia"
+            ).sum()
+        )
+
+        message = (
+            f"Estado global del lote: {overall_status}. "
+            f"Drift: {drift_count} variable(s). "
+            f"Vigilancia: {watch_count} variable(s)."
+        )
+
+        event = {
+            "Fecha": pd.Timestamp.now(),
+            "Estado": overall_status,
+            "Mensaje": message,
+        }
+
+        history = st.session_state.get(
+            "notification_history",
+            [],
+        )
+
+        history.insert(
+            0,
+            event,
+        )
+
+        st.session_state[
+            "notification_history"
+        ] = history[
+            :20
+        ]
+
+        st.session_state[
+            "alert_fingerprint"
+        ] = fingerprint
+
+        if overall_status == "Drift":
+            st.toast(
+                message,
+                icon="🚨",
+            )
+
+        else:
+            st.toast(
+                message,
+                icon="⚠️",
+            )
 
 
 # ============================================================
@@ -1195,13 +1859,7 @@ def run_streamlit_app():
     )
 
     st.caption(
-        "Proyecto MLOps - Henry | Avance 3"
-    )
-
-    st.info(
-        "Por defecto se utiliza TRAIN como población histórica "
-        "y TEST como población actual simulada. También podés cargar "
-        "un lote externo para simular datos posteriores al despliegue."
+        "Monitoreo de estabilidad de variables y pronósticos del modelo."
     )
 
     # --------------------------------------------------------
@@ -1220,13 +1878,37 @@ def run_streamlit_app():
             "xls",
         ],
         help=(
-            "Si no se carga un archivo, la aplicación usa "
-            "el conjunto TEST como población actual simulada."
+            "Si no se carga un archivo, la aplicación utiliza "
+            "TEST como población actual simulada."
         ),
     )
 
+    st.sidebar.markdown(
+        "---"
+    )
+
+    st.sidebar.markdown(
+        "**Umbrales principales**"
+    )
+
+    st.sidebar.caption(
+        f"PSI: vigilancia ≥ {PSI_WARNING} | drift ≥ {PSI_CRITICAL}"
+    )
+
+    st.sidebar.caption(
+        f"KS: vigilancia ≥ {KS_WARNING} | drift ≥ {KS_CRITICAL}"
+    )
+
+    st.sidebar.caption(
+        f"JS: vigilancia ≥ {JS_WARNING} | drift ≥ {JS_CRITICAL}"
+    )
+
+    st.sidebar.caption(
+        f"Chi²: p < {CHI2_P_THRESHOLD} = señal estadística"
+    )
+
     # --------------------------------------------------------
-    # Preparación de datos
+    # Datos
     # --------------------------------------------------------
 
     try:
@@ -1281,7 +1963,7 @@ def run_streamlit_app():
 
         st.info(
             "Ejecutá primero el entrenamiento para generar "
-            "el modelo localmente y luego volvé a iniciar Streamlit."
+            "el modelo localmente."
         )
 
         st.stop()
@@ -1306,381 +1988,791 @@ def run_streamlit_app():
         current_df=X_current,
     )
 
-    # --------------------------------------------------------
-    # Resumen
-    # --------------------------------------------------------
-
-    st.subheader(
-        "Resumen del monitoreo"
+    overall_status = get_overall_status(
+        drift_table
     )
 
-    metric_1, metric_2, metric_3, metric_4 = st.columns(
-        4
+    register_internal_notification(
+        overall_status=overall_status,
+        drift_table=drift_table,
     )
 
-    max_psi = (
-        float(
-            drift_table["PSI"].max()
-        )
-        if not drift_table.empty
-        else np.nan
-    )
-
-    critical_count = int(
-        (
-            drift_table["Estado"]
-            == "Crítico"
-        ).sum()
-    )
-
-    warning_count = int(
-        (
-            drift_table["Estado"]
-            == "Advertencia"
-        ).sum()
-    )
-
-    metric_1.metric(
-        "Registros actuales",
-        f"{len(X_current):,}".replace(
-            ",",
-            ".",
-        ),
-    )
-
-    metric_2.metric(
-        "Variables monitoreadas",
-        len(
-            drift_table
-        ),
-    )
-
-    metric_3.metric(
-        "PSI máximo global",
-        (
-            f"{max_psi:.4f}"
-            if pd.notna(
-                max_psi
-            )
-            else "N/D"
-        ),
-    )
-
-    metric_4.metric(
-        "Variables con alerta",
-        critical_count
-        + warning_count,
-    )
-
-    st.write(
-        f"**Modo:** {monitoring_mode}  \n"
-        f"**Periodicidad definida:** {MONITORING_FREQUENCY}  \n"
-        f"**Mínimo de registros por período:** {MIN_TEMPORAL_SAMPLES}"
-    )
-
-    overall_status = classify_drift(
-        max_psi
-    )
-
-    render_status_message(
+    status_icon = STATUS_ICON.get(
         overall_status,
-        (
-            f"Estado global: {overall_status}. "
-            f"PSI máximo = {max_psi:.4f}."
-        ),
+        "⚪",
     )
 
-    # --------------------------------------------------------
-    # Tabla de métricas
-    # --------------------------------------------------------
-
-    st.subheader(
-        "Métricas de Data Drift por variable"
+    st.markdown(
+        f"### Estado global del lote: {status_icon} {overall_status}"
     )
 
     st.caption(
-        "Variables numéricas: KS, PSI y Jensen-Shannon. "
-        "Variables categóricas: Chi-cuadrado, PSI y Jensen-Shannon."
+        f"Modo: {monitoring_mode} · "
+        f"Periodicidad: {MONITORING_FREQUENCY} · "
+        f"Mínimo temporal: {MIN_TEMPORAL_SAMPLES} registros"
     )
 
-    display_columns = [
-        "Variable",
-        "Tipo",
-        "PSI",
-        "Jensen-Shannon",
-        "KS statistic",
-        "KS p-value",
-        "Chi2 statistic",
-        "Chi2 p-value",
-        "Estado",
-        "Recomendación",
-    ]
-
-    existing_columns = [
-        column
-        for column in display_columns
-        if column in drift_table.columns
-    ]
-
-    st.dataframe(
-        drift_table[
-            existing_columns
-        ].round(4),
-        use_container_width=True,
-        hide_index=True,
+    st.markdown(
+        "---"
     )
 
-    # --------------------------------------------------------
-    # Comparación de distribuciones
-    # --------------------------------------------------------
-
-    st.subheader(
-        "Distribución histórica vs actual"
+    (
+        tab_metrics,
+        tab_temporal,
+        tab_alerts,
+    ) = st.tabs(
+        [
+            "📊 1. Visualización de métricas",
+            "📅 2. Análisis temporal",
+            "🚨 3. Recomendaciones y alertas",
+        ]
     )
 
-    available_features = [
-        feature
-        for feature in (
-            NUMERIC_FEATURES
-            + CATEGORICAL_FEATURES
-            + ORDINAL_FEATURES
+    # ========================================================
+    # TAB 1 - MÉTRICAS
+    # ========================================================
+
+    with tab_metrics:
+
+        st.subheader(
+            "Resumen de métricas"
         )
-        if (
-            feature
-            in X_reference.columns
-            and feature
-            in X_current.columns
+
+        st.info(
+            "Este tab resume el estado global del lote actual: compara "
+            "la población actual completa contra la referencia histórica. "
+            "Por eso puede mostrar estabilidad global aunque existan "
+            "desvíos puntuales en algunos períodos."
         )
-    ]
 
-    selected_feature = st.selectbox(
-        "Seleccioná una variable",
-        options=available_features,
-    )
-
-    if selected_feature:
-        selected_row = (
-            drift_table
-            .loc[
+        stable_count = int(
+            (
                 drift_table[
-                    "Variable"
+                    "Estado"
                 ]
-                == selected_feature
-            ]
-            .iloc[0]
+                == "Estable"
+            ).sum()
         )
 
-        c1, c2, c3 = st.columns(
-            3
+        watch_count = int(
+            (
+                drift_table[
+                    "Estado"
+                ]
+                == "Vigilancia"
+            ).sum()
         )
 
-        c1.metric(
-            "PSI",
-            f"{selected_row['PSI']:.4f}",
+        drift_count = int(
+            (
+                drift_table[
+                    "Estado"
+                ]
+                == "Drift"
+            ).sum()
         )
 
-        c2.metric(
-            "Jensen-Shannon",
-            f"{selected_row['Jensen-Shannon']:.4f}",
+        max_psi = (
+            float(
+                drift_table[
+                    "PSI"
+                ].max()
+            )
+            if not drift_table.empty
+            else np.nan
         )
 
-        c3.metric(
-            "Estado",
-            selected_row[
-                "Estado"
-            ],
+        (
+            col_1,
+            col_2,
+            col_3,
+            col_4,
+            col_5,
+        ) = st.columns(
+            5
         )
 
-        fig = plot_distribution_comparison(
-            reference_df=X_reference,
-            current_df=X_current,
-            feature=selected_feature,
+        col_1.metric(
+            "Variables monitoreadas",
+            len(
+                drift_table
+            ),
         )
 
-        st.pyplot(
-            fig,
-            use_container_width=True,
+        col_2.metric(
+            "🟢 Estables",
+            stable_count,
         )
 
-        plt.close(
-            fig
+        col_3.metric(
+            "🟡 Vigilancia",
+            watch_count,
+        )
+
+        col_4.metric(
+            "🔴 Drift",
+            drift_count,
+        )
+
+        col_5.metric(
+            "PSI máximo",
+            format_number(
+                max_psi
+            ),
         )
 
         render_status_message(
-            selected_row[
-                "Estado"
-            ],
-            selected_row[
-                "Recomendación"
-            ],
+            overall_status,
+            (
+                f"Estado global del lote: {overall_status}. "
+                f"Se detectaron {drift_count} variable(s) con drift "
+                f"y {watch_count} en vigilancia."
+            ),
         )
 
-    # --------------------------------------------------------
-    # Evolución temporal
-    # --------------------------------------------------------
-
-    st.subheader(
-        "Evolución temporal del drift"
-    )
-
-    if temporal_drift.empty:
-        st.info(
-            "No hay suficientes observaciones para construir "
-            "el análisis temporal."
+        st.markdown(
+            "#### Tabla de monitoreo"
         )
 
-    else:
-        chart_data = (
-            temporal_drift[
-                [
-                    "Periodo",
-                    "PSI promedio",
-                    "PSI máximo",
-                ]
+        (
+            filter_type,
+            filter_status,
+        ) = st.columns(
+            2
+        )
+
+        type_options = [
+            "Todos"
+        ] + sorted(
+            drift_table[
+                "Tipo"
             ]
-            .set_index(
-                "Periodo"
-            )
+            .dropna()
+            .unique()
+            .tolist()
         )
 
-        st.line_chart(
-            chart_data
+        status_options = [
+            "Todos",
+            "Drift",
+            "Vigilancia",
+            "Estable",
+        ]
+
+        selected_type = filter_type.selectbox(
+            "Filtrar por tipo",
+            options=type_options,
         )
+
+        selected_status = filter_status.selectbox(
+            "Filtrar por estado",
+            options=status_options,
+        )
+
+        filtered = drift_table.copy()
+
+        if selected_type != "Todos":
+            filtered = filtered.loc[
+                filtered[
+                    "Tipo"
+                ]
+                == selected_type
+            ]
+
+        if selected_status != "Todos":
+            filtered = filtered.loc[
+                filtered[
+                    "Estado"
+                ]
+                == selected_status
+            ]
 
         st.dataframe(
-            temporal_drift.round(4),
+            build_display_table(
+                filtered
+            ),
             use_container_width=True,
             hide_index=True,
         )
 
-        temporal_alerts = temporal_drift.loc[
-            temporal_drift[
-                "Estado período"
-            ].isin(
-                [
-                    "Advertencia",
-                    "Crítico",
+        st.caption(
+            "Umbrales: PSI ≥ 0.25 · KS ≥ 0.25 · "
+            "JS ≥ 0.30 = señales críticas. "
+            "Chi² p < 0.05 = evidencia estadística. "
+            "🟢 estable · 🟡 vigilancia · 🔴 drift"
+        )
+
+        st.markdown(
+            "#### Distribución histórica vs actual"
+        )
+
+        available_features = drift_table[
+            "Variable"
+        ].tolist()
+
+        selected_feature = st.selectbox(
+            "Seleccioná una variable",
+            options=available_features,
+        )
+
+        if selected_feature:
+            selected_row = (
+                drift_table
+                .loc[
+                    drift_table[
+                        "Variable"
+                    ]
+                    == selected_feature
+                ]
+                .iloc[
+                    0
                 ]
             )
-        ]
 
-        if temporal_alerts.empty:
-            st.success(
-                "No se detectaron períodos con drift relevante."
+            (
+                m1,
+                m2,
+                m3,
+                m4,
+            ) = st.columns(
+                4
+            )
+
+            m1.metric(
+                "Estado",
+                (
+                    f"{selected_row['Semáforo']} "
+                    f"{selected_row['Estado']}"
+                ),
+            )
+
+            m2.metric(
+                "PSI",
+                format_number(
+                    selected_row[
+                        "PSI"
+                    ]
+                ),
+            )
+
+            m3.metric(
+                "Jensen-Shannon",
+                format_number(
+                    selected_row[
+                        "Jensen-Shannon"
+                    ]
+                ),
+            )
+
+            if (
+                selected_row[
+                    "Tipo"
+                ]
+                == "Numérica"
+            ):
+                m4.metric(
+                    "KS",
+                    format_number(
+                        selected_row[
+                            "KS statistic"
+                        ]
+                    ),
+                )
+
+            else:
+                m4.metric(
+                    "Chi² p-value",
+                    format_number(
+                        selected_row[
+                            "Chi2 p-value"
+                        ]
+                    ),
+                )
+
+            if selected_row[
+                "Señales"
+            ]:
+                st.caption(
+                    f"Señales detectadas: {selected_row['Señales']}"
+                )
+
+            fig = plot_distribution_comparison(
+                reference_df=X_reference,
+                current_df=X_current,
+                feature=selected_feature,
+            )
+
+            st.pyplot(
+                fig,
+                use_container_width=True,
+            )
+
+            plt.close(
+                fig
+            )
+
+            render_status_message(
+                selected_row[
+                    "Estado"
+                ],
+                selected_row[
+                    "Recomendación"
+                ],
+            )
+
+        with st.expander(
+            "Datos actuales y pronósticos del modelo"
+        ):
+            st.dataframe(
+                prediction_table,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+    # ========================================================
+    # TAB 2 - ANÁLISIS TEMPORAL
+    # ========================================================
+
+    with tab_temporal:
+
+        st.subheader(
+            "Evolución temporal"
+        )
+
+        st.info(
+            "El análisis temporal evalúa cada período por separado contra "
+            "la referencia histórica general. Puede detectar desvíos locales "
+            "que no se observan en el agregado global. Estas diferencias "
+            "también pueden reflejar estacionalidad o cambios de composición, "
+            "por lo que deben interpretarse junto con el tamaño de muestra "
+            "y la persistencia de la señal."
+        )
+
+        if temporal_drift.empty:
+            st.info(
+                "No hay suficientes observaciones para construir "
+                "el análisis temporal."
             )
 
         else:
-            st.warning(
-                "Se detectaron períodos con desviaciones "
-                "que requieren seguimiento."
+            (
+                t1,
+                t2,
+                t3,
+                t4,
+            ) = st.columns(
+                4
             )
 
-            for _, row in temporal_alerts.iterrows():
-                period_text = (
+            t1.metric(
+                "Períodos analizados",
+                len(
+                    temporal_drift
+                ),
+            )
+
+            t2.metric(
+                "Períodos con drift",
+                int(
+                    (
+                        temporal_drift[
+                            "Estado período"
+                        ]
+                        == "Drift"
+                    ).sum()
+                ),
+            )
+
+            t3.metric(
+                "Períodos en vigilancia",
+                int(
+                    (
+                        temporal_drift[
+                            "Estado período"
+                        ]
+                        == "Vigilancia"
+                    ).sum()
+                ),
+            )
+
+            temporal_max_psi = temporal_drift[
+                "PSI máximo"
+            ].max()
+
+            t4.metric(
+                "PSI máximo temporal",
+                format_number(
+                    temporal_max_psi
+                ),
+            )
+
+            fig = plot_temporal_evolution(
+                temporal_drift
+            )
+
+            st.pyplot(
+                fig,
+                use_container_width=True,
+            )
+
+            plt.close(
+                fig
+            )
+
+            fig = plot_temporal_alert_counts(
+                temporal_drift
+            )
+
+            st.pyplot(
+                fig,
+                use_container_width=True,
+            )
+
+            plt.close(
+                fig
+            )
+
+            st.markdown(
+                "#### Resumen por período"
+            )
+
+            temporal_display = temporal_drift[
+                [
+                    "Semáforo",
+                    "Periodo",
+                    "Muestras actuales",
+                    "PSI promedio",
+                    "PSI máximo",
+                    "Variable más afectada",
+                    "Estado período",
+                    "Variables en vigilancia",
+                    "Variables con drift",
+                    "Variables monitoreadas",
+                ]
+            ].copy()
+
+            temporal_display[
+                "Periodo"
+            ] = (
+                temporal_display[
+                    "Periodo"
+                ]
+                .dt.strftime(
+                    "%Y-%m"
+                )
+            )
+
+            st.dataframe(
+                temporal_display.round(
+                    4
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            st.markdown(
+                "#### Detalle de un período"
+            )
+
+            period_options = temporal_drift[
+                "Periodo"
+            ].tolist()
+
+            selected_period = st.selectbox(
+                "Seleccioná un período",
+                options=period_options,
+                format_func=lambda value: (
                     pd.Timestamp(
-                        row["Periodo"]
+                        value
                     )
                     .strftime(
                         "%Y-%m"
                     )
-                )
+                ),
+            )
 
-                render_status_message(
-                    row[
-                        "Estado período"
-                    ],
-                    (
-                        f"{period_text} | "
-                        f"PSI máximo = {row['PSI máximo']:.4f} | "
-                        f"Variable más afectada: "
-                        f"{row['Variable más afectada']} | "
-                        f"Variables con alerta: "
-                        f"{int(row['Variables con alerta'])}"
+            detail = get_period_drift_detail(
+                reference_df=X_reference,
+                current_df=X_current,
+                selected_period=selected_period,
+            )
+
+            if not detail.empty:
+                st.dataframe(
+                    build_display_table(
+                        detail
                     ),
+                    use_container_width=True,
+                    hide_index=True,
                 )
 
-    # --------------------------------------------------------
-    # Pronósticos
-    # --------------------------------------------------------
+    # ========================================================
+    # TAB 3 - ALERTAS Y RECOMENDACIONES
+    # ========================================================
 
-    st.subheader(
-        "Datos actuales y pronósticos del modelo"
-    )
+    with tab_alerts:
 
-    st.dataframe(
-        prediction_table,
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    if (
-        "probabilidad_no_pago"
-        in prediction_table.columns
-    ):
         st.subheader(
-            "Distribución del riesgo pronosticado"
+            "Alertas y recomendaciones"
         )
 
-        fig, ax = plt.subplots(
-            figsize=(9, 4)
-        )
-
-        ax.hist(
-            prediction_table[
-                "probabilidad_no_pago"
-            ].dropna(),
-            bins=20,
-        )
-
-        ax.set_title(
-            "Probabilidad estimada de no pagar a tiempo"
-        )
-
-        ax.set_xlabel(
-            "Probabilidad"
-        )
-
-        ax.set_ylabel(
-            "Cantidad de observaciones"
-        )
-
-        fig.tight_layout()
-
-        st.pyplot(
-            fig,
-            use_container_width=True,
-        )
-
-        plt.close(
-            fig
-        )
-
-    # --------------------------------------------------------
-    # Metodología
-    # --------------------------------------------------------
-
-    with st.expander(
-        "Metodología y criterios"
-    ):
         st.markdown(
-            """
-            **PSI**
-            - Menor a 0.10: estable.
-            - Entre 0.10 y 0.25: advertencia.
-            - Mayor o igual a 0.25: crítico.
-
-            **Pruebas complementarias**
-            - Kolmogorov-Smirnov para variables numéricas.
-            - Chi-cuadrado para variables categóricas.
-            - Jensen-Shannon para comparar distribuciones.
-
-            **Importante:** cuando no se carga un segundo dataset,
-            TRAIN se utiliza como referencia histórica y TEST como
-            población actual simulada. Esto permite validar el proceso
-            de monitoreo, pero no representa drift real posterior al
-            despliegue.
-            """
+            "#### Alertas globales del lote"
         )
+
+        st.caption(
+            "Estas alertas corresponden a la comparación de la población "
+            "actual completa contra la referencia histórica."
+        )
+
+        alert_table = build_alert_table(
+            drift_table
+        )
+
+        if alert_table.empty:
+            st.success(
+                "🟢 No se detectaron variables que requieran "
+                "acción o vigilancia."
+            )
+
+        else:
+            drift_alerts = alert_table.loc[
+                alert_table[
+                    "Estado"
+                ]
+                == "Drift"
+            ]
+
+            watch_alerts = alert_table.loc[
+                alert_table[
+                    "Estado"
+                ]
+                == "Vigilancia"
+            ]
+
+            if not drift_alerts.empty:
+                st.error(
+                    f"🚨 Se detectó drift en {len(drift_alerts)} "
+                    "variable(s)."
+                )
+
+                for _, row in drift_alerts.iterrows():
+                    with st.expander(
+                        (
+                            f"🔴 {row['Variable']} "
+                            f"({row['Tipo']})"
+                        ),
+                        expanded=True,
+                    ):
+                        st.write(
+                            f"**Señales:** {row['Señales']}"
+                        )
+
+                        st.write(
+                            f"**Recomendación:** {row['Recomendación']}"
+                        )
+
+            if not watch_alerts.empty:
+                st.warning(
+                    f"⚠️ Hay {len(watch_alerts)} variable(s) "
+                    "en vigilancia."
+                )
+
+                for _, row in watch_alerts.iterrows():
+                    with st.expander(
+                        (
+                            f"🟡 {row['Variable']} "
+                            f"({row['Tipo']})"
+                        )
+                    ):
+                        st.write(
+                            f"**Señales:** {row['Señales']}"
+                        )
+
+                        st.write(
+                            f"**Recomendación:** {row['Recomendación']}"
+                        )
+
+            st.markdown(
+                "#### Tabla consolidada de alertas globales"
+            )
+
+            st.dataframe(
+                alert_table,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            alerts_csv = (
+                alert_table
+                .to_csv(
+                    index=False
+                )
+                .encode(
+                    "utf-8-sig"
+                )
+            )
+
+            st.download_button(
+                label="⬇️ Descargar alertas en CSV",
+                data=alerts_csv,
+                file_name="alertas_data_drift.csv",
+                mime="text/csv",
+            )
+
+        st.markdown(
+            "#### Alertas temporales"
+        )
+
+        st.caption(
+            "Estas alertas corresponden a períodos individuales. Un período "
+            "puede presentar vigilancia o drift aunque el lote completo sea "
+            "globalmente estable."
+        )
+
+        if temporal_drift.empty:
+            st.info(
+                "No hay suficientes observaciones para generar "
+                "alertas temporales."
+            )
+
+        else:
+            temporal_alerts = temporal_drift.loc[
+                temporal_drift[
+                    "Estado período"
+                ].isin(
+                    [
+                        "Vigilancia",
+                        "Drift",
+                    ]
+                )
+            ].copy()
+
+            if temporal_alerts.empty:
+                st.success(
+                    "🟢 No se detectaron períodos con señales "
+                    "de vigilancia o drift."
+                )
+
+            else:
+                temporal_drift_count = int(
+                    (
+                        temporal_alerts[
+                            "Estado período"
+                        ]
+                        == "Drift"
+                    ).sum()
+                )
+
+                temporal_watch_count = int(
+                    (
+                        temporal_alerts[
+                            "Estado período"
+                        ]
+                        == "Vigilancia"
+                    ).sum()
+                )
+
+                if temporal_drift_count:
+                    st.error(
+                        f"🚨 Se detectó drift en {temporal_drift_count} "
+                        "período(s)."
+                    )
+
+                if temporal_watch_count:
+                    st.warning(
+                        f"⚠️ Hay {temporal_watch_count} período(s) "
+                        "en vigilancia."
+                    )
+
+                temporal_alerts_display = temporal_alerts[
+                    [
+                        "Semáforo",
+                        "Periodo",
+                        "Muestras actuales",
+                        "Estado período",
+                        "Variable más afectada",
+                        "PSI máximo",
+                        "Variables en vigilancia",
+                        "Variables con drift",
+                        "Señal principal",
+                        "Recomendación",
+                    ]
+                ].copy()
+
+                temporal_alerts_display[
+                    "Periodo"
+                ] = (
+                    temporal_alerts_display[
+                        "Periodo"
+                    ]
+                    .dt.strftime(
+                        "%Y-%m"
+                    )
+                )
+
+                st.dataframe(
+                    temporal_alerts_display.round(
+                        4
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+        st.markdown(
+            "#### Notificaciones internas"
+        )
+
+        st.caption(
+            "Las notificaciones de esta versión se generan dentro "
+            "del dashboard. El envío externo por email, Slack u otro "
+            "canal puede incorporarse posteriormente."
+        )
+
+        history = st.session_state.get(
+            "notification_history",
+            [],
+        )
+
+        if not history:
+            st.info(
+                "No se generaron notificaciones en esta sesión."
+            )
+
+        else:
+            history_df = pd.DataFrame(
+                history
+            )
+
+            st.dataframe(
+                history_df,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        with st.expander(
+            "Criterios utilizados para el semáforo"
+        ):
+            st.markdown(
+                f"""
+                **Variables numéricas**
+                - PSI: vigilancia desde `{PSI_WARNING}` y drift desde `{PSI_CRITICAL}`.
+                - KS statistic: vigilancia desde `{KS_WARNING}` y drift desde `{KS_CRITICAL}`.
+                - Jensen-Shannon: vigilancia desde `{JS_WARNING}` y drift desde `{JS_CRITICAL}`.
+                - KS p-value `< {KS_P_THRESHOLD}` se utiliza como señal estadística de vigilancia.
+
+                **Variables categóricas**
+                - PSI: vigilancia desde `{PSI_WARNING}` y drift desde `{PSI_CRITICAL}`.
+                - Jensen-Shannon: vigilancia desde `{JS_WARNING}` y drift desde `{JS_CRITICAL}`.
+                - Chi² p-value `< {CHI2_P_THRESHOLD}` indica diferencia estadísticamente significativa.
+                - Chi² por sí solo genera vigilancia; para reforzar una clasificación crítica se combina con una señal de magnitud.
+
+                **Interpretación**
+                - 🟢 Estable: sin señales relevantes.
+                - 🟡 Vigilancia: cambio moderado o evidencia estadística que requiere seguimiento.
+                - 🔴 Drift: cambio de magnitud relevante según alguna de las métricas principales.
+                """
+            )
 
 
 if __name__ == "__main__":
