@@ -1,18 +1,16 @@
 # 💳 Predicción de Comportamiento de Pago - MLOps Pipeline
 
-Proyecto integrador desarrollado en el marco del **Módulo 5 - Producción ML / MLOps** del bootcamp de Henry.
+Proyecto de Machine Learning orientado a la construcción de un pipeline MLOps para predecir el comportamiento de pago de clientes de una entidad financiera.
 
-El objetivo del proyecto es construir progresivamente un pipeline de Machine Learning capaz de predecir el comportamiento de pago de clientes de crédito, incorporando buenas prácticas de análisis de datos, ingeniería de características, entrenamiento, evaluación, versionado, monitoreo y preparación para producción.
+El desarrollo integra las etapas de comprensión y preparación de datos, ingeniería de características, entrenamiento y evaluación de modelos, persistencia del modelo, monitoreo de Data Drift y visualización mediante una aplicación desarrollada en Streamlit.
 
 ---
 
-## 📋 Caso de negocio
+## 🎯 1. Caso de negocio
 
-En el otorgamiento de créditos resulta importante poder anticipar el comportamiento de pago de los clientes.
+El objetivo del proyecto es desarrollar un modelo de Machine Learning capaz de predecir si un cliente realizará el pago de su crédito en tiempo y forma.
 
-A partir de información histórica relacionada con características crediticias, laborales y financieras, se desarrolla un modelo de clasificación que permite estimar si un cliente realizará sus pagos a tiempo.
-
-La variable objetivo es:
+La variable objetivo utilizada es:
 
 ```text
 Pago_atiempo
@@ -20,14 +18,16 @@ Pago_atiempo
 
 donde:
 
-- `1` = Pago a tiempo.
-- `0` = No paga a tiempo.
+- `1` representa clientes que pagan a tiempo.
+- `0` representa clientes que no pagan a tiempo.
 
-El objetivo no es únicamente obtener un modelo predictivo, sino construir un flujo reproducible y organizado que pueda evolucionar progresivamente hacia un entorno MLOps.
+El problema corresponde a una tarea de **clasificación binaria con clases desbalanceadas**, ya que aproximadamente el 95 % de los registros corresponde a clientes que pagan a tiempo y alrededor del 5 % a clientes que no lo hacen.
+
+Desde el punto de vista del negocio, la detección de la clase minoritaria resulta especialmente relevante, debido a que permite identificar anticipadamente clientes con mayor riesgo de incumplimiento.
 
 ---
 
-## 🗂️ Estructura actual del proyecto
+## 📂 2. Estructura del proyecto
 
 ```text
 mlops_pipeline/
@@ -40,68 +40,101 @@ mlops_pipeline/
 │   └── model_monitoring.py
 │
 ├── Base_de_datos.xlsx
+├── README.md
 ├── requirements.txt
-├── .gitignore
-└── README.md
+└── .gitignore
 ```
 
-El archivo `best_model.joblib` se genera localmente al ejecutar el entrenamiento, pero se encuentra excluido del repositorio mediante `.gitignore` porque es un artefacto generado y no forma parte de la estructura fuente del entregable.
-
----
-
-## 🔎 1. Comprensión y análisis exploratorio de datos
-
-El análisis exploratorio inicial permitió conocer la estructura y las principales características del dataset.
-
-El conjunto de datos contiene:
-
-- **10.763 registros**.
-- **23 variables**.
-- No se detectaron filas duplicadas.
-
-Durante esta etapa se analizaron tipos de variables, valores faltantes, distribución de las características, comportamiento de la variable objetivo, calidad general de los datos y posibles transformaciones necesarias para el modelado.
-
-### Variable objetivo
-
-La distribución de `Pago_atiempo` presenta un fuerte desbalance:
+El archivo:
 
 ```text
-Pago a tiempo       ≈ 95 %
-No pago a tiempo    ≈ 5 %
+best_model.joblib
 ```
 
-Por este motivo, la evaluación de los modelos no se basa únicamente en `Accuracy`. Se presta especial atención al desempeño sobre la clase `0`, que representa a los clientes que no pagan a tiempo.
+se genera localmente luego del entrenamiento del modelo y no se versiona en GitHub, ya que se encuentra incluido en `.gitignore`.
 
 ---
 
-## 🛠️ 2. Ingeniería de características
+## 🔎 3. Comprensión y exploración de los datos
 
-La preparación de datos se implementa en:
+El dataset utilizado contiene:
+
+- **10.763 registros**
+- **23 variables**
+- Sin registros duplicados relevantes.
+- Variable objetivo: `Pago_atiempo`.
+
+Durante el análisis exploratorio se estudiaron:
+
+- estructura del dataset;
+- tipos de variables;
+- valores faltantes;
+- distribución de variables numéricas y categóricas;
+- distribución de la variable objetivo;
+- relaciones entre variables;
+- posibles variables con riesgo de fuga de información.
+
+Uno de los principales hallazgos fue el fuerte desbalance de la variable objetivo:
+
+```text
+Pago_atiempo = 1 → aproximadamente 95 %
+Pago_atiempo = 0 → aproximadamente 5 %
+```
+
+Por esta razón, la evaluación del modelo no se basa únicamente en Accuracy, sino que se presta especial atención a métricas relacionadas con la detección de la clase minoritaria.
+
+---
+
+## ⚙️ 4. Ingeniería de características
+
+El procesamiento de datos se encuentra centralizado en:
 
 ```text
 src/ft_engineering.py
 ```
 
-Entre las principales tareas se encuentran:
+Las principales transformaciones realizadas incluyen:
 
-- limpieza y validación de variables;
+- limpieza y validación de datos;
+- conversión de variables categóricas;
 - tratamiento de valores faltantes;
-- transformación de variables categóricas;
-- tratamiento de variables ordinales;
-- generación de nuevas características a partir de la fecha del préstamo;
-- separación entre variables predictoras y variable objetivo;
+- generación de variables temporales;
+- separación de variables predictoras y variable objetivo;
 - división estratificada entre entrenamiento y prueba;
-- construcción de un pipeline de preprocesamiento mediante `ColumnTransformer`.
+- construcción del pipeline de preprocesamiento.
 
-El pipeline utiliza `SimpleImputer`, `OneHotEncoder`, `OrdinalEncoder`, `ColumnTransformer` y `Pipeline` de Scikit-learn.
+A partir de `fecha_prestamo` se generan:
 
-El preprocesamiento se ajusta exclusivamente sobre los datos de entrenamiento para evitar fuga de información entre `train` y `test`.
+```text
+anio_prestamo
+mes_prestamo
+```
 
-### Consideraciones sobre los datos y posible leakage
+Las variables numéricas utilizan imputación por mediana.
 
-El dataset fue proporcionado sin un diccionario de datos completo. Por ese motivo, algunas variables requieren trabajar bajo supuestos documentados.
+Las variables categóricas utilizan imputación por moda y codificación One-Hot Encoding.
 
-Se identificaron variables cuyo momento de generación no puede determinarse con certeza:
+La variable ordinal:
+
+```text
+tendencia_ingresos
+```
+
+se procesa respetando el siguiente orden:
+
+```text
+Decreciente
+Estable
+Creciente
+```
+
+---
+
+## ⚠️ 5. Prevención de Data Leakage
+
+Durante el análisis se identificaron variables que podían contener información disponible posteriormente al otorgamiento del crédito o relacionada directamente con el comportamiento de pago.
+
+Por esta razón se excluyeron del conjunto de variables predictoras:
 
 ```text
 puntaje
@@ -111,20 +144,26 @@ saldo_principal
 saldo_mora_codeudor
 ```
 
-Ante la posibilidad de que contengan información posterior al otorgamiento del crédito, fueron consideradas variables con potencial `data leakage` y excluidas preventivamente del modelo principal.
+Esta decisión permite reducir el riesgo de **Data Leakage** y obtener una evaluación más realista del modelo.
 
-También se detectaron inconsistencias en `tendencia_ingresos`, donde coexistían categorías válidas con valores no esperados. Estos registros son tratados dentro del proceso de limpieza previo a la codificación.
+---
 
-### División de los datos
+## ✂️ 6. División de los datos
 
-Se utiliza una división estratificada:
+Se utilizó una división estratificada:
 
 ```text
 80 % entrenamiento
 20 % prueba
 ```
 
-Resultado:
+con:
+
+```text
+random_state = 42
+```
+
+La distribución resultante fue:
 
 ```text
 Train: 8.610 registros
@@ -135,204 +174,394 @@ La estratificación permite mantener aproximadamente la misma proporción de cla
 
 ---
 
-## 🤖 3. Entrenamiento y evaluación de modelos
+## 🤖 7. Entrenamiento y comparación de modelos
 
-El entrenamiento se implementa en:
+El entrenamiento se encuentra implementado en:
 
 ```text
 src/model_train_evaluation.py
 ```
 
-Se compararon tres algoritmos de clasificación supervisada:
+Se compararon tres modelos de clasificación:
 
-- Logistic Regression;
-- Random Forest;
-- XGBoost.
+1. Logistic Regression
+2. Random Forest
+3. XGBoost
 
-Debido al fuerte desbalance de la variable objetivo, se analizaron `Accuracy`, `Balanced Accuracy`, Precision de la clase `0`, Recall de la clase `0`, F1-Score de la clase `0`, ROC-AUC de la clase `0`, PR-AUC de la clase `0` y matrices de confusión.
+Debido al desbalance de clases, se aplicaron estrategias específicas de ponderación:
 
-### Resultados comparativos
+- `class_weight="balanced"` en Logistic Regression.
+- `class_weight="balanced"` en Random Forest.
+- pesos balanceados de muestra para XGBoost.
 
-| Modelo | Accuracy | Balanced Accuracy | Precision clase 0 | Recall clase 0 | F1 clase 0 | ROC-AUC clase 0 | PR-AUC clase 0 |
+Las métricas utilizadas fueron:
+
+- Accuracy
+- Balanced Accuracy
+- Precision de la clase 0
+- Recall de la clase 0
+- F1-score de la clase 0
+- ROC-AUC
+- PR-AUC
+- Matriz de confusión
+
+---
+
+## 📊 8. Resultados de los modelos
+
+| Modelo | Accuracy | Balanced Accuracy | Precision clase 0 | Recall clase 0 | F1 clase 0 | ROC-AUC | PR-AUC |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Logistic Regression | 0.6521 | 0.5752 | 0.0669 | 0.4902 | 0.1178 | 0.6200 | 0.0786 |
 | Random Forest | 0.9526 | 0.5000 | 0.0000 | 0.0000 | 0.0000 | 0.6700 | 0.1441 |
 | XGBoost | 0.8402 | 0.5994 | 0.1097 | 0.3333 | **0.1650** | **0.6787** | **0.1485** |
 
-### Modelo seleccionado
+Aunque Random Forest presenta una Accuracy elevada, no logra identificar correctamente observaciones pertenecientes a la clase minoritaria.
 
-Se seleccionó **XGBoost** como modelo candidato porque obtuvo el mejor `F1-Score` sobre la clase minoritaria (`0`).
+El modelo seleccionado fue **XGBoost**, principalmente por presentar el mejor F1-score para la clase `0`, junto con mejores valores de ROC-AUC y PR-AUC.
 
-La selección no se basa exclusivamente en `Accuracy`, ya que Random Forest alcanza una Accuracy elevada pero no identifica correctamente los casos de no pago a tiempo. Logistic Regression logra un Recall superior para la clase `0`, pero genera una cantidad considerablemente mayor de falsos positivos. XGBoost presenta un mejor equilibrio entre Precision y Recall sobre la clase relevante para el problema.
+---
 
-Al finalizar el entrenamiento, el modelo seleccionado se persiste localmente como:
+## 💾 9. Persistencia del modelo
+
+Una vez seleccionado el mejor modelo, se almacena utilizando `joblib`:
 
 ```text
 best_model.joblib
 ```
 
-Este archivo es utilizado por la aplicación de monitoreo y se regenera ejecutando nuevamente el entrenamiento.
+Este archivo permite reutilizar el pipeline completo sin necesidad de volver a entrenar el modelo cada vez que se realiza una predicción o un proceso de monitoreo.
+
+El archivo se genera localmente ejecutando:
+
+```bash
+python src/model_train_evaluation.py
+```
 
 ---
 
-## 📊 4. Monitoreo de Data Drift - Avance 3
+# 📈 10. Monitoreo de Data Drift
 
-El monitoreo se implementa en:
+El monitoreo del comportamiento de los datos se encuentra implementado en:
 
 ```text
 src/model_monitoring.py
 ```
 
-El objetivo es detectar cambios en la distribución de las variables de entrada que puedan indicar que la población actual se está alejando de la población utilizada como referencia.
+El objetivo es comparar una población histórica de referencia contra una población actual y detectar cambios en la distribución de las variables que puedan afectar el comportamiento del modelo.
 
-### Métricas utilizadas
-
-Para variables numéricas se calculan:
-
-- **Kolmogorov-Smirnov (KS)**;
-- **Population Stability Index (PSI)**;
-- **Jensen-Shannon Divergence**.
-
-Para variables categóricas se calculan:
-
-- **Chi-cuadrado**;
-- **Population Stability Index (PSI)**;
-- **Jensen-Shannon Divergence**.
-
-Las pruebas estadísticas se utilizan como evidencia complementaria. El semáforo operativo principal se construye a partir de PSI.
-
-### Umbrales de PSI
-
-Para este ejercicio se adoptan los siguientes umbrales operativos:
-
-```text
-PSI < 0.10          → Estable
-0.10 ≤ PSI < 0.25   → Advertencia
-PSI ≥ 0.25          → Crítico
-```
-
----
-
-## 🧪 Metodología de referencia y población actual
-
-En un escenario productivo ideal, el monitoreo compara una población histórica de referencia con datos nuevos posteriores al despliegue.
-
-En este proyecto no se dispone de un segundo dataset independiente correspondiente a observaciones posteriores a producción. Por ese motivo, el modo de monitoreo por defecto utiliza:
+En ausencia de datos reales posteriores a la puesta en producción, el proyecto utiliza:
 
 ```text
 TRAIN → población histórica de referencia
 TEST  → población actual simulada
 ```
 
-Esta estrategia permite validar el funcionamiento del sistema de detección de Data Drift utilizando observaciones que no fueron empleadas para ajustar el modelo.
+Esta configuración permite demostrar la lógica completa de monitoreo sin presentar el conjunto TEST como datos reales de producción.
 
-**Importante:** los resultados obtenidos en este modo deben interpretarse como una **simulación académica del proceso de monitoreo** y no como evidencia de drift real posterior al despliegue.
-
-La implementación permite además cargar desde Streamlit un archivo externo en formato CSV o Excel y utilizarlo como nueva población actual. De esta manera, cuando exista un lote real de datos posteriores al despliegue, puede reemplazarse la muestra `TEST` sin modificar las funciones de cálculo de drift.
-
----
-
-## 📅 Monitoreo temporal
-
-Se definió una periodicidad de análisis **mensual**.
-
-Para evitar conclusiones basadas en muestras demasiado pequeñas, solo se informan períodos que contienen al menos:
+La aplicación también permite cargar posteriormente un nuevo lote de datos mediante archivos:
 
 ```text
-50 observaciones
+CSV
+XLSX
+XLS
 ```
 
-Las variables `anio_prestamo` y `mes_prestamo` se utilizan para identificar cada período mensual, pero se excluyen del cálculo de drift dentro de ese mismo período. Esto evita detectar artificialmente cambios provocados por la propia segmentación temporal.
-
-El monitoreo temporal informa cantidad de observaciones por período, PSI promedio, PSI máximo, variable más afectada, estado del período, variables en advertencia, variables críticas, cantidad total de variables con alerta y recomendación operativa.
+sin modificar la lógica principal del sistema.
 
 ---
 
-## 📈 Resultados del monitoreo
+## 📐 11. Métricas de Data Drift
 
-### Análisis global
+El monitoreo utiliza diferentes métricas según el tipo de variable.
 
-Al comparar `TRAIN` contra `TEST`, las variables presentan valores de PSI global inferiores a `0.10`.
+### Variables numéricas
 
-El mayor PSI global observado fue aproximadamente:
+Se utilizan:
+
+- **Population Stability Index (PSI)**
+- **Kolmogorov-Smirnov (KS)**
+- **Jensen-Shannon Divergence**
+
+### Variables categóricas
+
+Se utilizan:
+
+- **Population Stability Index (PSI)**
+- **Chi-cuadrado**
+- **Jensen-Shannon Divergence**
+
+La utilización de varias métricas permite evitar que la decisión dependa únicamente de un único indicador.
+
+---
+
+## 🚦 12. Criterio de clasificación del drift
+
+El sistema utiliza tres estados:
 
 ```text
-0.0164
+🟢 Estable
+🟡 Vigilancia
+🔴 Drift
 ```
 
-correspondiente a `promedio_ingresos_datacredito`.
-
-Por lo tanto, bajo la simulación global `TRAIN vs TEST`, no se detectaron desviaciones relevantes según el criterio de PSI.
-
-En `huella_consulta` se obtuvo un `KS p-value` inferior a `0.05`, aunque su PSI y su divergencia Jensen-Shannon fueron muy bajos. Por ese motivo, la diferencia estadística no se interpreta por sí sola como un cambio de magnitud práctica relevante.
-
-### Análisis temporal
-
-Al analizar la población `TEST` por períodos mensuales sí aparecen cambios locales respecto de la referencia histórica general.
-
-La variable `promedio_ingresos_datacredito` resultó la más afectada en varios períodos. Los mayores valores de PSI temporal se observaron, entre otros, en junio y septiembre de 2025.
-
-Estos resultados no implican necesariamente que el modelo haya perdido capacidad predictiva. El Data Drift describe cambios en las variables de entrada; una degradación real del modelo requeriría además evaluar el rendimiento predictivo sobre datos posteriores al despliegue cuando se disponga de sus valores reales.
-
----
-
-## 🖥️ Aplicación de monitoreo con Streamlit
-
-El Avance 3 incorpora una aplicación interactiva desarrollada con **Streamlit** dentro de:
+### PSI
 
 ```text
-src/model_monitoring.py
+PSI < 0.10          → Estable
+0.10 ≤ PSI < 0.25   → Vigilancia
+PSI ≥ 0.25          → Drift
 ```
 
-La aplicación permite visualizar:
+### Kolmogorov-Smirnov
 
-- modo de monitoreo utilizado;
-- cantidad de registros actuales;
-- cantidad de variables monitoreadas;
-- PSI máximo global;
-- cantidad de variables con alerta;
-- tabla de métricas de Data Drift;
-- estado tipo semáforo;
-- recomendaciones;
-- comparación visual entre distribución histórica y actual;
-- evolución temporal del drift;
-- alertas por período;
-- datos actuales junto con los pronósticos del modelo;
-- distribución de la probabilidad estimada de no pagar a tiempo.
-
-También permite cargar opcionalmente un nuevo dataset en formato `.csv`, `.xlsx` o `.xls` para utilizarlo como población actual en reemplazo de la simulación con `TEST`.
-
----
-
-## ⚠️ Interpretación de alertas
-
-El monitoreo distingue entre alertas globales y temporales. Las primeras evalúan si la población actual completa presenta cambios relevantes respecto de la referencia histórica; las segundas evalúan cada período mensual por separado.
-
-Por este motivo, puede existir estabilidad global y, al mismo tiempo, períodos particulares con advertencias o valores críticos.
-
-Una alerta de Data Drift no implica automáticamente reentrenar el modelo. Ante una alerta crítica se recomienda revisar la variable afectada, validar la calidad y origen de los datos, verificar si el cambio persiste, analizar el rendimiento predictivo cuando exista `ground truth` y considerar reentrenamiento solo si la evidencia lo justifica.
-
----
-
-## 🌿 Flujo de trabajo con Git
-
-El repositorio utiliza diferentes ramas para separar desarrollo, integración y versiones estables.
+Para variables numéricas:
 
 ```text
-feature/*
-    ↓
-developer
-    ↓
-main
+KS < 0.15           → Sin señal relevante
+0.15 ≤ KS < 0.25    → Vigilancia
+KS ≥ 0.25           → Drift
 ```
 
-Las ramas `feature/*` se utilizan para desarrollar funcionalidades específicas. `developer` funciona como rama de integración y `main` contiene las versiones estables y aprobadas.
+El `p-value` de KS también se analiza como evidencia estadística.
 
-Los cambios se incorporan mediante Pull Requests para mantener trazabilidad sobre la evolución del proyecto.
+Un `p-value < 0.05` por sí solo genera una señal de vigilancia, pero no necesariamente implica un cambio relevante desde el punto de vista práctico.
+
+### Jensen-Shannon
+
+```text
+JS < 0.15           → Sin señal relevante
+0.15 ≤ JS < 0.30    → Vigilancia
+JS ≥ 0.30           → Drift
+```
+
+### Chi-cuadrado
+
+Para variables categóricas:
+
+```text
+p-value < 0.05
+```
+
+indica una diferencia estadísticamente significativa entre las distribuciones.
+
+Sin embargo, Chi-cuadrado no se utiliza de forma aislada para declarar automáticamente un drift crítico.
+
+El resultado se interpreta en conjunto con PSI y Jensen-Shannon.
 
 ---
 
-## ⚙️ Instalación
+## 🧠 13. Lógica combinada del semáforo
+
+El estado final de cada variable se determina combinando diferentes señales.
+
+Para variables numéricas se consideran:
+
+```text
+PSI + KS + Jensen-Shannon
+```
+
+Para variables categóricas:
+
+```text
+PSI + Chi-cuadrado + Jensen-Shannon
+```
+
+Las métricas estadísticas permiten detectar diferencias entre poblaciones, mientras que las métricas de magnitud ayudan a determinar si el cambio observado es suficientemente importante desde el punto de vista operativo.
+
+De esta manera se evita clasificar una variable como crítica únicamente porque una prueba estadística arroje significancia.
+
+---
+
+# 🖥️ 14. Dashboard de monitoreo en Streamlit
+
+El sistema de monitoreo cuenta con una aplicación interactiva desarrollada en **Streamlit**.
+
+La aplicación se organiza en tres secciones principales.
+
+---
+
+## 📊 Tab 1 - Visualización de métricas
+
+Presenta el estado global del lote actual comparando:
+
+```text
+Población histórica completa
+vs.
+Población actual completa
+```
+
+Incluye:
+
+- cantidad total de variables monitoreadas;
+- variables estables;
+- variables en vigilancia;
+- variables con drift;
+- PSI máximo;
+- tabla consolidada de métricas;
+- filtros por tipo de variable;
+- filtros por estado;
+- selección individual de variables;
+- comparación gráfica entre distribución histórica y actual;
+- interpretación y recomendación de cada variable.
+
+Este análisis representa el **estado global del lote**.
+
+---
+
+## 📅 Tab 2 - Análisis temporal
+
+El monitoreo temporal analiza cada período de forma independiente contra la referencia histórica.
+
+La periodicidad definida es:
+
+```text
+Mensual
+```
+
+y se requiere un mínimo de:
+
+```text
+50 registros por período
+```
+
+Las variables:
+
+```text
+anio_prestamo
+mes_prestamo
+```
+
+se utilizan para construir los períodos, pero no se incluyen como variables de drift dentro del análisis temporal para evitar generar desviaciones artificiales.
+
+El dashboard permite visualizar:
+
+- PSI promedio por período;
+- PSI máximo;
+- cantidad de variables en vigilancia;
+- cantidad de variables con drift;
+- variable más afectada;
+- estado general del período;
+- evolución temporal;
+- detalle de todas las variables para un mes seleccionado.
+
+El análisis temporal puede detectar desviaciones locales aunque la población global permanezca estable.
+
+Por esta razón, un período puede aparecer en vigilancia o drift aun cuando el estado global del lote sea estable.
+
+Estas diferencias también pueden estar asociadas a factores como estacionalidad, cambios en la composición de la población o tamaños de muestra más pequeños, por lo que deben analizarse considerando su persistencia en el tiempo.
+
+---
+
+## 🚨 Tab 3 - Recomendaciones y alertas
+
+Esta sección centraliza las señales detectadas por el sistema.
+
+Se diferencian:
+
+```text
+Alertas globales
+Alertas temporales
+```
+
+Las alertas globales corresponden al lote actual completo.
+
+Las alertas temporales corresponden a desviaciones detectadas en períodos individuales.
+
+Para cada señal se informa:
+
+- variable afectada;
+- tipo de variable;
+- estado;
+- métricas que originaron la alerta;
+- recomendación sugerida.
+
+El sistema también genera notificaciones internas dentro de la aplicación cuando cambia el conjunto de variables en vigilancia o drift.
+
+Además, las alertas pueden exportarse en formato:
+
+```text
+CSV
+```
+
+para facilitar su análisis o integración posterior con otros procesos.
+
+---
+
+## 🔔 15. Interpretación de las alertas
+
+Las alertas no implican automáticamente que el modelo haya dejado de funcionar correctamente.
+
+El **Data Drift** indica que la distribución de las variables de entrada ha cambiado respecto de la población utilizada como referencia.
+
+Ante una señal persistente de drift se recomienda:
+
+1. verificar calidad e integridad de los datos;
+2. analizar cambios en la fuente de información;
+3. estudiar si existen cambios en el comportamiento de la población;
+4. evaluar las métricas de desempeño del modelo cuando se disponga de la variable objetivo real;
+5. considerar un nuevo entrenamiento si el cambio persiste y afecta el rendimiento predictivo.
+
+---
+
+## 📌 16. Principales hallazgos del monitoreo
+
+La comparación global entre TRAIN y TEST muestra una población relativamente estable, lo cual resulta esperable debido a que ambos conjuntos pertenecen al mismo universo de datos.
+
+Sin embargo, el análisis temporal permite detectar períodos individuales con desviaciones más importantes.
+
+Esto demuestra una diferencia relevante entre:
+
+```text
+Estabilidad global
+vs.
+Desviaciones locales por período
+```
+
+El monitoreo temporal permite identificar cambios que pueden quedar ocultos al observar únicamente la distribución agregada.
+
+---
+
+# 🔄 17. Flujo general del pipeline
+
+El flujo implementado puede resumirse de la siguiente manera:
+
+```text
+Datos originales
+      ↓
+Comprensión y EDA
+      ↓
+Limpieza de datos
+      ↓
+Ingeniería de características
+      ↓
+Prevención de Data Leakage
+      ↓
+Train / Test Split
+      ↓
+Preprocesamiento
+      ↓
+Entrenamiento de modelos
+      ↓
+Evaluación
+      ↓
+Selección de XGBoost
+      ↓
+Persistencia del modelo
+      ↓
+Predicciones
+      ↓
+Monitoreo de Data Drift
+      ↓
+Análisis temporal
+      ↓
+Alertas y recomendaciones
+      ↓
+Dashboard Streamlit
+```
+
+---
+
+# ▶️ 18. Instalación
 
 Clonar el repositorio:
 
@@ -346,19 +575,9 @@ Ingresar al proyecto:
 cd mlops_pipeline
 ```
 
-Crear un entorno virtual:
+Crear y activar un entorno virtual.
 
-```bash
-python -m venv .venv
-```
-
-Activarlo en Windows PowerShell:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-```
-
-Instalar las dependencias:
+Instalar dependencias:
 
 ```bash
 pip install -r requirements.txt
@@ -366,29 +585,39 @@ pip install -r requirements.txt
 
 ---
 
-## ▶️ Ejecución
+# 🤖 19. Entrenamiento del modelo
 
-### Feature Engineering
-
-```bash
-python src/ft_engineering.py
-```
-
-### Entrenamiento y selección del modelo
+Ejecutar:
 
 ```bash
 python src/model_train_evaluation.py
 ```
 
-Este paso genera localmente `best_model.joblib`.
+Este proceso entrena los modelos, compara las métricas, selecciona el mejor modelo y genera localmente:
 
-### Aplicación de monitoreo
+```text
+best_model.joblib
+```
+
+---
+
+# 📊 20. Ejecución del dashboard
+
+Desde la raíz del proyecto:
 
 ```bash
 python -m streamlit run src/model_monitoring.py
 ```
 
-Por defecto, Streamlit inicia la aplicación en una dirección local similar a:
+Si la terminal se encuentra dentro de `src`:
+
+```bash
+python -m streamlit run model_monitoring.py
+```
+
+Streamlit iniciará un servidor local y permitirá acceder al dashboard desde el navegador.
+
+Generalmente:
 
 ```text
 http://localhost:8501
@@ -396,7 +625,7 @@ http://localhost:8501
 
 ---
 
-## 🧰 Tecnologías utilizadas
+# 🛠️ 21. Tecnologías utilizadas
 
 - Python
 - Pandas
@@ -406,43 +635,62 @@ http://localhost:8501
 - SciPy
 - Matplotlib
 - Streamlit
-- Jupyter Notebook
 - Joblib
+- Jupyter Notebook
 - Git
 - GitHub
 
 ---
 
-## 🔄 Evolución del pipeline
+# 🌿 22. Flujo de trabajo con Git
+
+El proyecto utiliza una estructura de ramas para mantener separado el desarrollo de nuevas funcionalidades del código estable.
+
+Las ramas principales son:
 
 ```text
-Datos
-  ↓
-EDA
-  ↓
-Feature Engineering
-  ↓
-Entrenamiento
-  ↓
-Evaluación
-  ↓
-Selección del modelo
-  ↓
-Persistencia
-  ↓
-Monitoreo de Data Drift
-  ↓
-Aplicación Streamlit
-  ↓
-Próximas etapas de producción
+main
+developer
+certification
 ```
+
+Las nuevas funcionalidades se desarrollan en ramas temporales:
+
+```text
+feature/*
+```
+
+El flujo general utilizado es:
+
+```text
+feature/*
+    ↓
+developer
+    ↓
+main
+```
+
+Los cambios se integran mediante Pull Requests y las ramas temporales se eliminan una vez finalizada su integración.
 
 ---
 
-## 🎓 Contexto
+# 📌 23. Estado actual del proyecto
 
-**Proyecto Integrador**  
-**Módulo 5 - Producción ML / MLOps**
+Actualmente el pipeline permite:
 
-El proyecto se desarrolla de manera incremental aplicando conceptos de Machine Learning, ingeniería de características, reproducibilidad, control de versiones, monitoreo y buenas prácticas de MLOps.
+- cargar y preparar los datos;
+- realizar ingeniería de características;
+- prevenir Data Leakage;
+- entrenar y comparar diferentes algoritmos;
+- seleccionar el modelo con mejor desempeño para la clase minoritaria;
+- persistir el modelo entrenado;
+- generar predicciones;
+- monitorear Data Drift;
+- utilizar diferentes métricas según el tipo de variable;
+- analizar cambios globales y temporales;
+- generar alertas y recomendaciones;
+- visualizar los resultados mediante un dashboard interactivo en Streamlit.
 
+El proyecto mantiene una estructura modular que permite continuar incorporando nuevas etapas de producción, automatización y despliegue del modelo.
+
+---
