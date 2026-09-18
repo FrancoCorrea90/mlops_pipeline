@@ -2,7 +2,7 @@
 
 Proyecto de Machine Learning orientado a la construcción de un pipeline MLOps para predecir el comportamiento de pago de clientes de una entidad financiera.
 
-El desarrollo integra las etapas de comprensión y preparación de datos, ingeniería de características, entrenamiento y evaluación de modelos, persistencia del modelo, monitoreo de Data Drift y visualización mediante una aplicación desarrollada en Streamlit.
+El desarrollo integra las etapas de comprensión y preparación de datos, ingeniería de características, entrenamiento y evaluación de modelos, persistencia del modelo, monitoreo de Data Drift, visualización mediante una aplicación desarrollada en Streamlit y disponibilización del modelo mediante una API construida con FastAPI y contenerizada con Docker.
 
 ---
 
@@ -568,9 +568,7 @@ Evaluación
       ↓
 Selección de XGBoost
       ↓
-Persistencia del modelo
-      ↓
-Predicciones
+Persistencia del Pipeline
       ↓
 Monitoreo de Data Drift
       ↓
@@ -579,7 +577,12 @@ Análisis temporal
 Alertas y recomendaciones
       ↓
 Dashboard Streamlit
-```
+      ↓
+API con FastAPI
+      ↓
+Predicción individual / batch
+      ↓
+Contenerización con Docker
 
 ---
 
@@ -656,9 +659,15 @@ http://localhost:8501
 - XGBoost
 - SciPy
 - Matplotlib
+- Seaborn
 - Streamlit
 - Joblib
 - Jupyter Notebook
+- OpenPyXL
+- FastAPI
+- Pydantic
+- Uvicorn
+- Docker
 - Git
 - GitHub
 
