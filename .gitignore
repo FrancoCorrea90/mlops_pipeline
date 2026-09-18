@@ -1,0 +1,22 @@
+# Entornos virtuales
+*venv*/
+.venv/
+
+# Datos generados/procesados (regenerables desde Cargar_datos.ipynb)
+data/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Python
+__pycache__/
+*.pyc
+
+# Variables de entorno
+.env
+
+# Editor
+.vscode/
+
+# Documentación local de estudio
+Guia_Estudio_model_monitoring_actualizada.pdf
