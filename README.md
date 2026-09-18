@@ -702,23 +702,464 @@ Los cambios se integran mediante Pull Requests y las ramas temporales se elimina
 
 ---
 
-# 📌 23. Estado actual del proyecto
+# 🚀 23. API de predicción con FastAPI
 
-Actualmente el pipeline permite:
+El modelo entrenado se disponibiliza mediante una API desarrollada con **FastAPI**, implementada en:
 
-- cargar y preparar los datos;
-- realizar ingeniería de características;
-- prevenir Data Leakage;
-- entrenar y comparar diferentes algoritmos;
-- seleccionar el modelo con mejor desempeño para la clase minoritaria;
-- persistir el modelo entrenado;
-- generar predicciones;
-- monitorear Data Drift;
-- utilizar diferentes métricas según el tipo de variable;
-- analizar cambios globales y temporales;
-- generar alertas y recomendaciones;
-- visualizar los resultados mediante un dashboard interactivo en Streamlit.
+```text
+src/model_deploy.py
+```
 
-El proyecto mantiene una estructura modular que permite continuar incorporando nuevas etapas de producción, automatización y despliegue del modelo.
+Al iniciar la aplicación se carga:
+
+```text
+best_model.joblib
+```
+
+Este archivo contiene el Pipeline completo de Machine Learning utilizado durante el entrenamiento, compuesto por:
+
+```text
+Preprocesamiento
+      ↓
+Modelo de clasificación
+```
+
+De esta manera, el modelo puede realizar nuevas predicciones sin necesidad de volver a ejecutar el proceso de entrenamiento.
+
+La API cuenta con tres endpoints principales:
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| GET | `/health` | Verifica que la API esté activa y que el modelo haya sido cargado correctamente. |
+| POST | `/predict` | Realiza una predicción para un único registro. |
+| POST | `/predict/batch` | Permite enviar múltiples registros en una sola solicitud y obtener predicciones por lotes. |
+
+## Preparación de los datos para inferencia
+
+Durante la etapa de Feature Engineering, la variable original:
+
+```text
+fecha_prestamo
+```
+
+fue transformada en:
+
+```text
+anio_prestamo
+mes_prestamo
+```
+
+Estas variables son utilizadas posteriormente por el modelo.
+
+Por esta razón, la API recibe `fecha_prestamo` y reproduce esta transformación antes de realizar la inferencia:
+
+```text
+fecha_prestamo
+      ↓
+anio_prestamo
+mes_prestamo
+      ↓
+Pipeline
+      ↓
+Predicción
+```
+
+Asimismo, `tipo_credito` se transforma a texto para mantener consistencia con el tratamiento realizado durante el entrenamiento.
+
+Las restantes transformaciones se encuentran incorporadas dentro del Pipeline persistido:
+
+- imputación de variables numéricas mediante mediana;
+- imputación de variables categóricas mediante el valor más frecuente;
+- One-Hot Encoding para variables categóricas nominales;
+- codificación ordinal para `tendencia_ingresos`.
+
+## Validación de entradas
+
+La API utiliza **Pydantic** para definir y validar el esquema de los datos recibidos.
+
+Esto permite controlar los tipos de las variables antes de que la información sea enviada al modelo.
+
+Entre las variables de entrada se encuentran:
+
+```text
+tipo_credito
+capital_prestado
+plazo_meses
+edad_cliente
+tipo_laboral
+salario_cliente
+total_otros_prestamos
+cuota_pactada
+puntaje_datacredito
+cant_creditosvigentes
+huella_consulta
+creditos_sectorFinanciero
+creditos_sectorCooperativo
+creditos_sectorReal
+promedio_ingresos_datacredito
+tendencia_ingresos
+fecha_prestamo
+```
+
+## Ejecución local de la API
+
+Desde el directorio `src`:
+
+```bash
+python -m uvicorn model_deploy:app --reload
+```
+
+Una vez iniciado el servidor, la documentación interactiva generada automáticamente por FastAPI puede consultarse mediante Swagger UI:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+El estado del servicio puede verificarse mediante:
+
+```text
+http://127.0.0.1:8000/health
+```
+
+Una respuesta válida es:
+
+```json
+{
+  "status": "ok",
+  "model_loaded": true
+}
+```
+
+## Predicción individual
+
+El endpoint:
+
+```text
+POST /predict
+```
+
+recibe un único registro y devuelve la clase predicha junto con una interpretación del resultado.
+
+Ejemplo:
+
+```json
+{
+  "prediction": 0,
+  "resultado": "No paga a tiempo"
+}
+```
+
+La interpretación utilizada es:
+
+```text
+0 → No paga a tiempo
+1 → Paga a tiempo
+```
+
+## Predicción por lotes
+
+El endpoint:
+
+```text
+POST /predict/batch
+```
+
+permite enviar múltiples registros en una única solicitud.
+
+Los registros son transformados en un DataFrame y procesados conjuntamente por el modelo.
+
+Ejemplo de respuesta:
+
+```json
+{
+  "cantidad_registros": 2,
+  "predictions": [
+    {
+      "registro": 1,
+      "prediction": 0,
+      "resultado": "No paga a tiempo"
+    },
+    {
+      "registro": 2,
+      "prediction": 1,
+      "resultado": "Paga a tiempo"
+    }
+  ]
+}
+```
+
+---
+
+# 🐳 24. Contenerización con Docker
+
+Con el objetivo de disponer de un entorno reproducible para ejecutar el servicio de inferencia, la API fue contenerizada mediante **Docker**.
+
+La imagen utiliza:
+
+```text
+Python 3.12
+```
+
+e incorpora:
+
+```text
+Código fuente
+      +
+Dependencias
+      +
+Pipeline entrenado
+      +
+FastAPI
+      +
+Uvicorn
+```
+
+El proceso de construcción se encuentra definido en:
+
+```text
+Dockerfile
+```
+
+## Dockerfile
+
+La imagen parte de:
+
+```dockerfile
+FROM python:3.12-slim
+```
+
+y utiliza:
+
+```text
+/app
+```
+
+como directorio de trabajo dentro del contenedor.
+
+El flujo de construcción puede resumirse como:
+
+```text
+Imagen Python 3.12
+      ↓
+Copiar requirements.txt
+      ↓
+Instalar dependencias
+      ↓
+Copiar best_model.joblib
+      ↓
+Copiar src/
+      ↓
+Exponer puerto 8000
+      ↓
+Iniciar Uvicorn
+```
+
+La aplicación se ejecuta mediante:
+
+```text
+uvicorn src.model_deploy:app
+```
+
+escuchando conexiones en:
+
+```text
+0.0.0.0:8000
+```
+
+## Construcción de la imagen
+
+Desde la raíz del repositorio:
+
+```bash
+docker build -t mlops-pipeline-api:1.0 .
+```
+
+La imagen generada utiliza:
+
+```text
+Nombre: mlops-pipeline-api
+Tag:    1.0
+```
+
+## Ejecución del contenedor
+
+El contenedor puede iniciarse mediante:
+
+```bash
+docker run --name mlops-pipeline-container -p 8000:8000 mlops-pipeline-api:1.0
+```
+
+El parámetro:
+
+```text
+-p 8000:8000
+```
+
+realiza el siguiente mapeo:
+
+```text
+Puerto 8000 del equipo host
+            ↓
+Puerto 8000 del contenedor
+            ↓
+Uvicorn
+            ↓
+FastAPI
+```
+
+Una vez iniciado el contenedor, la documentación de la API puede consultarse desde el equipo host en:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+## .dockerignore
+
+El archivo:
+
+```text
+.dockerignore
+```
+
+permite excluir del contexto de construcción elementos que no son necesarios para ejecutar el servicio, como:
+
+- entornos virtuales;
+- caché de Python;
+- archivos temporales;
+- configuración local del editor;
+- archivos de Git;
+- documentación local.
+
+Esto permite mantener el contexto de construcción más limpio y evitar incorporar archivos innecesarios a la imagen.
+
+---
+
+# ✅ 25. Validación del despliegue
+
+El servicio fue validado tanto en ejecución local como dentro de un contenedor Docker.
+
+Se verificaron exitosamente:
+
+- carga de `best_model.joblib`;
+- inicialización de FastAPI;
+- ejecución del servicio mediante Uvicorn;
+- endpoint `GET /health`;
+- predicción individual mediante `POST /predict`;
+- predicción por lotes mediante `POST /predict/batch`;
+- validación automática de entradas mediante Pydantic;
+- transformación de `fecha_prestamo` en año y mes;
+- documentación interactiva mediante Swagger UI;
+- construcción de la imagen Docker;
+- creación y ejecución del contenedor;
+- acceso a la API desde el equipo host.
+
+Las pruebas realizadas sobre los endpoints de predicción devolvieron:
+
+```text
+HTTP 200 OK
+```
+
+confirmando que el Pipeline puede realizar inferencia correctamente dentro del entorno contenerizado.
+
+El flujo final de inferencia es:
+
+```text
+Solicitud HTTP
+      ↓
+FastAPI
+      ↓
+Validación con Pydantic
+      ↓
+Feature Engineering de inferencia
+      ↓
+DataFrame
+      ↓
+best_model.joblib
+      ↓
+Pipeline
+      ↓
+Preprocesamiento
+      ↓
+Modelo de Machine Learning
+      ↓
+Predicción
+      ↓
+Respuesta JSON
+```
+
+Además, la versión integrada del proyecto fue promovida mediante el siguiente flujo de ramas:
+
+```text
+feature/*
+    ↓
+developer
+    ↓
+certification
+    ↓
+main
+```
+
+La rama `certification` se utilizó como instancia de validación integral previa a la promoción de la versión estable a `main`.
+
+---
+
+# 📌 26. Estado actual del proyecto
+
+Actualmente el proyecto integra las principales etapas del ciclo de vida de una solución de Machine Learning:
+
+- carga y comprensión de los datos;
+- análisis exploratorio;
+- ingeniería de características;
+- prevención de Data Leakage;
+- división estratificada de entrenamiento y prueba;
+- construcción de pipelines de preprocesamiento;
+- entrenamiento y comparación de diferentes algoritmos;
+- selección del modelo con mejor desempeño para la clase minoritaria;
+- persistencia del Pipeline entrenado;
+- monitoreo de Data Drift;
+- análisis global y temporal de cambios en las distribuciones;
+- generación de alertas y recomendaciones;
+- visualización mediante un dashboard interactivo en Streamlit;
+- disponibilización del modelo mediante una API desarrollada con FastAPI;
+- validación automática de datos de entrada mediante Pydantic;
+- inferencia para registros individuales;
+- inferencia por lotes;
+- ejecución de la API mediante Uvicorn;
+- contenerización del servicio mediante Docker;
+- validación integral previa a la publicación de la versión estable.
+
+El flujo general alcanzado es:
+
+```text
+Comprensión de datos
+        ↓
+Feature Engineering
+        ↓
+Entrenamiento
+        ↓
+Evaluación
+        ↓
+Persistencia del Pipeline
+        ↓
+Monitoreo de Data Drift
+        ↓
+Dashboard de monitoreo
+        ↓
+API de inferencia
+        ↓
+Predicción individual y batch
+        ↓
+Contenerización con Docker
+```
+
+El Pipeline entrenado se encuentra persistido mediante `joblib` y puede utilizarse para realizar nuevas predicciones sin necesidad de volver a ejecutar el entrenamiento.
+
+El dashboard desarrollado con Streamlit permite analizar métricas de Data Drift, evolución temporal y recomendaciones asociadas a posibles cambios en la distribución de los datos.
+
+La API desarrollada con FastAPI permite disponibilizar el modelo para realizar inferencia mediante solicitudes HTTP, tanto para registros individuales como para múltiples observaciones.
+
+Finalmente, Docker permite ejecutar el servicio de inferencia dentro de un entorno reproducible que contiene las dependencias, el código fuente y el modelo necesarios para su funcionamiento.
+
+De esta manera, el proyecto integra preparación de datos, entrenamiento, evaluación, persistencia, monitoreo y despliegue dentro de un mismo pipeline de Machine Learning.
 
 ---
