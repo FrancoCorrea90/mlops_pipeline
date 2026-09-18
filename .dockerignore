@@ -1,0 +1,32 @@
+# Git
+.git
+.gitignore
+
+# Entornos virtuales
+.venv
+*venv*
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# Jupyter
+.ipynb_checkpoints
+
+# Variables de entorno
+.env
+
+# Editor
+.vscode
+
+# Datos regenerables
+data
+
+# Documentación local
+Guia_Estudio_model_monitoring_actualizada.pdf
+
+# Archivos temporales
+*.tmp
+*.log
