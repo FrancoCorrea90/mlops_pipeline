@@ -29,6 +29,8 @@ Desde el punto de vista del negocio, la detección de la clase minoritaria resul
 
 ## 📂 2. Estructura del proyecto
 
+La estructura principal del repositorio es la siguiente:
+
 ```text
 mlops_pipeline/
 │
@@ -37,21 +39,30 @@ mlops_pipeline/
 │   ├── comprension_eda.ipynb
 │   ├── ft_engineering.py
 │   ├── model_train_evaluation.py
-│   └── model_monitoring.py
+│   ├── model_monitoring.py
+│   └── model_deploy.py
 │
 ├── Base_de_datos.xlsx
-├── README.md
+├── best_model.joblib
 ├── requirements.txt
-└── .gitignore
+├── Dockerfile
+├── .dockerignore
+├── .gitignore
+└── README.md
 ```
 
-El archivo:
+### Principales componentes
 
-```text
-best_model.joblib
-```
-
-se genera localmente luego del entrenamiento del modelo y no se versiona en GitHub, ya que se encuentra incluido en `.gitignore`.
+- `Cargar_datos.ipynb`: carga y revisión inicial de la base de datos.
+- `comprension_eda.ipynb`: análisis exploratorio y comprensión de las variables.
+- `ft_engineering.py`: limpieza, Feature Engineering y definición del preprocesamiento.
+- `model_train_evaluation.py`: entrenamiento, evaluación, comparación y persistencia de modelos.
+- `model_monitoring.py`: análisis de Data Drift y dashboard de monitoreo.
+- `model_deploy.py`: disponibilización del modelo mediante una API desarrollada con FastAPI.
+- `best_model.joblib`: Pipeline entrenado y persistido para realizar inferencia.
+- `requirements.txt`: dependencias necesarias para reproducir el entorno.
+- `Dockerfile`: instrucciones para construir la imagen Docker del servicio de inferencia.
+- `.dockerignore`: exclusión de archivos innecesarios durante la construcción de la imagen.
 
 ---
 
@@ -235,8 +246,19 @@ El archivo se genera localmente ejecutando:
 
 ```bash
 python src/model_train_evaluation.py
+
+```
+El artefacto `best_model.joblib` contiene el **Pipeline completo utilizado durante el entrenamiento**, integrando:
+
+```text
+Preprocesamiento
+      ↓
+Modelo de clasificación
 ```
 
+Esto permite reutilizar exactamente las mismas transformaciones aprendidas durante el entrenamiento al momento de realizar nuevas predicciones.
+
+En la etapa de despliegue, `model_deploy.py` carga directamente este Pipeline mediante `joblib`, por lo que no es necesario volver a entrenar el modelo para realizar inferencia.
 ---
 
 # 📈 10. Monitoreo de Data Drift
@@ -660,12 +682,18 @@ Las nuevas funcionalidades se desarrollan en ramas temporales:
 feature/*
 ```
 
+La rama developer se utiliza para integrar las funcionalidades desarrolladas en ramas feature/*.
+
+Una vez consolidado el desarrollo, los cambios se promueven a certification, donde se valida el funcionamiento integral del proyecto antes de generar la versión final estable en main.
+
 El flujo general utilizado es:
 
 ```text
 feature/*
     ↓
 developer
+    ↓
+certification
     ↓
 main
 ```
